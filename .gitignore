@@ -4,3 +4,5 @@ input/
 output/
 
 .DS_Store
+
+interference_sources/
