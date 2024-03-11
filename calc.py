@@ -3,11 +3,30 @@ import glob
 import os
 import geopandas as gpd
 import pandas as pd
+import argparse
 
-INPUT_DIR = './input'
-OUTPUT_DIR = './output'
+# Create the parser
+parser = argparse.ArgumentParser(description='Process some integers.')
+
+# Add the arguments
+parser.add_argument('DirName', metavar='DirName',
+                    type=str, help='the directory name')
+parser.add_argument('--debug', action='store_true', help='enable debug mode')
+
+# Parse the arguments
+args = parser.parse_args()
+
+# Now the directory name is available as args.DirName
+INPUT_DIR = f'./{args.DirName}/input'
+OUTPUT_DIR = f'./{args.DirName}/output'
+DEBUG_DIR = './debug'
+
+# Create debug directory if it doesn't exist and debug mode is enabled
+if args.debug:
+    os.makedirs(DEBUG_DIR, exist_ok=True)
+
 # Directory containing interference sources
-INTERFERENCE_SOURCES_DIR = './interference_sources'
+INTERFERENCE_SOURCES_DIR = f'./{args.DirName}/interference_sources'
 CRS = 'epsg:25833'
 # craete dirs if not exist
 os.makedirs(INPUT_DIR, exist_ok=True)
@@ -69,51 +88,73 @@ def get_input_features():
     for file in glob.glob(f'{INPUT_DIR}/*.shp'):
         input_feature = gpd.read_file(file)
         input_feature = input_feature.to_crs(CRS)
-        input_features.append(input_feature)
+        file_base_name = os.path.basename(file).split('.')[0]
+        input_features.append((input_feature, file_base_name))
+        area = input_feature.area.sum()
+        # Print the area and name of the input feature
+        print(f"Area of {file_base_name}: {area}")
 
     return input_features
 
 
 def merged_features(input_features, buffers):
+
     # Merge and dissolve all input features
-    merged_input_feature = pd.concat(input_features, ignore_index=True)
+    merged_input_feature = pd.concat(
+        [feature for feature, _ in input_features], ignore_index=True)
+    if args.debug:
+        merged_input_feature.to_file(f'{DEBUG_DIR}/1_merged_input_feature.shp')
 
     # Buffer distance
     buffer_distance = 10  # You can adjust this value as needed
 
     # Buffer all merged features
     buffered_features = merged_input_feature.buffer(buffer_distance)
-
-    # Convert buffered_features to GeoDataFrame
     buffered_features = gpd.GeoDataFrame(geometry=buffered_features)
+    if args.debug:
+        buffered_features.to_file(f'{DEBUG_DIR}/2_buffered_features.shp')
 
     # Dissolve all features into a single feature
     dissolved_features = buffered_features.dissolve()
+    if args.debug:
+        dissolved_features.to_file(f'{DEBUG_DIR}/3_dissolved_features.shp')
 
     # Reduce the buffer
     reduced_buffer = dissolved_features.buffer(-buffer_distance)
-
-    # Convert reduced_buffer to GeoDataFrame
     reduced_buffer = gpd.GeoDataFrame(geometry=reduced_buffer)
+    if args.debug:
+        reduced_buffer.to_file(f'{DEBUG_DIR}/4_reduced_buffer.shp')
 
     merged_input_feature = reduced_buffer
 
     merged_input_feature_B1_intersection = gpd.overlay(
         merged_input_feature, buffers[0], how='intersection')
+    if args.debug:
+        merged_input_feature_B1_intersection.to_file(
+            f'{DEBUG_DIR}/5_merged_input_feature_B1_intersection.shp')
+
     merged_input_feature_B2_intersection = gpd.overlay(
         merged_input_feature, buffers[1], how='intersection')
+    if args.debug:
+        merged_input_feature_B2_intersection.to_file(
+            f'{DEBUG_DIR}/6_merged_input_feature_B2_intersection.shp')
 
     merged_input_feature_B2_not_B1 = gpd.overlay(
         merged_input_feature_B2_intersection, merged_input_feature_B1_intersection, how='difference')
+    if args.debug:
+        merged_input_feature_B2_not_B1.to_file(
+            f'{DEBUG_DIR}/7_merged_input_feature_B2_not_B1.shp')
 
     merged_input_feature_B1_area = merged_input_feature_B1_intersection.area.sum()
     merged_input_feature_B2_not_B1_area = merged_input_feature_B2_not_B1.area.sum()
 
+    # Subtract merged_input_feature_B2_intersection from reduced_buffer
     merged_input_feature_outside_B2 = gpd.overlay(
-        merged_input_feature, buffers[1], how='difference')
+        reduced_buffer, merged_input_feature_B2_intersection, how='difference')
 
-    merged_input_feature_outside_B2 = merged_input_feature_outside_B2[
-        merged_input_feature_outside_B2.geometry.type == 'Polygon']
+    if args.debug:
+        merged_input_feature_outside_B2.to_file(
+            f'{DEBUG_DIR}/8_merged_input_feature_outside_B2.shp')
 
     merged_input_feature_outside_B2_area = merged_input_feature_outside_B2.area.sum()
 
