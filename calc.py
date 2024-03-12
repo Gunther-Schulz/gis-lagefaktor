@@ -17,17 +17,22 @@ parser.add_argument('--debug', action='store_true', help='enable debug mode')
 args = parser.parse_args()
 
 # Now the directory name is available as args.DirName
-INPUT_DIR = f'./{args.DirName}/input'
-OUTPUT_DIR = f'./{args.DirName}/output'
-DEBUG_DIR = './debug'
+DATA_DIR = './DATA'
+INPUT_DIR = f'{DATA_DIR}/{args.DirName}/input'
+OUTPUT_DIR = f'{DATA_DIR}/{args.DirName}/output'
+DEBUG_DIR = f'{DATA_DIR}/{args.DirName}/debug'
+INTERFERENCE_SOURCES_DIR = f'{DATA_DIR}/{args.DirName}/interference_sources'
 
 # Create debug directory if it doesn't exist and debug mode is enabled
 if args.debug:
     os.makedirs(DEBUG_DIR, exist_ok=True)
+# remove all files
+for file in os.listdir(DEBUG_DIR):
+    os.remove(f'{DEBUG_DIR}/{file}')
 
-# Directory containing interference sources
-INTERFERENCE_SOURCES_DIR = f'./{args.DirName}/interference_sources'
+# Set the coordinate reference system (CRS) to EPSG 25833
 CRS = 'epsg:25833'
+
 # craete dirs if not exist
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -190,12 +195,27 @@ def separate_features(input_features, buffers):
         # Calculate intersections
         input_feature_B1_intersection = gpd.overlay(
             input_feature, buffers[0], how='intersection')
+        input_feature_B1_intersection = process_geometries(
+            input_feature_B1_intersection)
+        if args.debug:
+            input_feature_B1_intersection.to_file(
+                f'{DEBUG_DIR}/1_{file_base_name}_B1_intersection.shp')
+
         input_feature_B2_intersection = gpd.overlay(
             input_feature, buffers[1], how='intersection')
+        input_feature_B2_intersection = process_geometries(
+            input_feature_B2_intersection)
+        if args.debug:
+            input_feature_B2_intersection.to_file(
+                f'{DEBUG_DIR}/2_{file_base_name}_B2_intersection.shp')
 
         # Subtract input_feature_B1_intersection from input_feature_B2_intersection
         input_feature_B2_not_B1 = gpd.overlay(
             input_feature_B2_intersection, input_feature_B1_intersection, how='difference')
+        input_feature_B2_not_B1 = process_geometries(input_feature_B2_not_B1)
+        if args.debug:
+            input_feature_B2_not_B1.to_file(
+                f'{DEBUG_DIR}/3_{file_base_name}_B2_not_B1.shp')
 
         # Calculate areas of intersections
         input_feature_B1_area = input_feature_B1_intersection.area.sum()
@@ -204,10 +224,15 @@ def separate_features(input_features, buffers):
         # Calculate area outside B2
         input_feature_outside_B2 = gpd.overlay(
             input_feature, buffers[1], how='difference')
+        # if args.debug:
+        #     input_feature_outside_B2.to_file(
+        #         f'{DEBUG_DIR}/4_{file_base_name}_outside_B2.shp')
 
-        # Filter to only include polygons
-        input_feature_outside_B2 = input_feature_outside_B2[
-            input_feature_outside_B2.geometry.type == 'Polygon']
+        input_feature_outside_B2 = process_geometries(input_feature_outside_B2)
+
+        if args.debug:
+            input_feature_outside_B2.to_file(
+                f'{DEBUG_DIR}/5_{file_base_name}_outside_B2.shp')
 
         # Calculate area
         input_feature_outside_B2_area = input_feature_outside_B2.area.sum()
@@ -238,7 +263,35 @@ def separate_features(input_features, buffers):
                 f'{OUTPUT_DIR}/{file_base_name}_outside_buffer_{buffer_distances[1]}.shp')
 
 
+def process_geometries(input_feature_outside_B2):
+    # Explode MultiPolygon geometries into individual Polygon geometries
+    input_feature_outside_B2 = input_feature_outside_B2.explode(
+        index_parts=False)
+
+    # Filter to only include polygons
+    input_feature_outside_B2 = input_feature_outside_B2[
+        input_feature_outside_B2.geometry.type == 'Polygon']
+
+    # Remove polygons with area of < 0.1
+    input_feature_outside_B2 = input_feature_outside_B2[
+        input_feature_outside_B2.geometry.area >= 0.1]
+
+    # Merge overlapping polygons
+    # Add a column with the same value for all rows
+    input_feature_outside_B2["group"] = 0
+    input_feature_outside_B2 = input_feature_outside_B2.dissolve(by="group")
+
+    # Explode MultiPolygon geometries into individual Polygon geometries again
+    input_feature_outside_B2 = input_feature_outside_B2.explode(
+        index_parts=False)
+
+    # Reset index
+    input_feature_outside_B2 = input_feature_outside_B2.reset_index(drop=True)
+
+    return input_feature_outside_B2
+
+
 buffers = get_buffers(buffer_distances)
 input_features = get_input_features()
-merged_features(input_features, buffers)
-# separate_features(input_features, buffers)
+# merged_features(input_features, buffers)
+separate_features(input_features, buffers)

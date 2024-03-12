@@ -1,8 +1,4 @@
-
-input/
-
-output/
+DATA/
 
 .DS_Store
 
-interference_sources/
