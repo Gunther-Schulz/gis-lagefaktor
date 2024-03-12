@@ -46,27 +46,33 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 for file in os.listdir(OUTPUT_DIR):
     os.remove(f'{OUTPUT_DIR}/{file}')
 
-# # Global variable to keep track of the context
-# context = None
+# Global variable to keep track of the context
+context = None
 
 
-# def custom_warning(message, category, filename, lineno, file=None, line=None):
-#     no_buffer_pattern = r"`?keep_geom_type=True`? in overlay resulted in .* dropped geometries of .* than .*\. Set `?keep_geom_type=False`? to retain all geometries"
-#     match = re.search(no_buffer_pattern, str(message))
-#     if match:
-#         if context == '100':
-#             print("Custom Warning: There is no area for a distance < 100")
-#         elif context == '100>625':
-#             print("Custom Warning: There is no area for a distance >100 <625")
-#         elif context == '625':
-#             print("Custom Warning: There is no area for a distance > 625")
-#         else:
-#             print('Custom Warning: ' + str(message))
-#     else:
-#         print('Custom Warning: ' + str(message))
+def custom_warning(message, category, filename, lineno, file=None, line=None):
+    no_buffer_pattern = r"`?keep_geom_type=True`? in overlay resulted in .* dropped geometries of .* than .*\. Set `?keep_geom_type=False`? to retain all geometries"
+    match = re.search(no_buffer_pattern, str(message))
+    if match:
+        if context == 'outside Buffer >625':
+            print(
+                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
+        elif context == 'intersects with Buffer >100 <625 but not Buffer <100':
+            print(
+                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
+        elif context == 'intersects with Buffer <100':
+            print(
+                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
+        elif context == 'intersects with Buffer >100 <625':
+            print(
+                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
+        else:
+            print('Custom Warning: ' + str(message))
+    else:
+        print('Custom Warning: ' + str(message))
 
 
-# warnings.showwarning = custom_warning
+warnings.showwarning = custom_warning
 
 
 def create_buffer(distance):
@@ -255,11 +261,13 @@ def preprocess_changing_features(changing_features, unchanged_features):
 #             f'{OUTPUT_DIR}/merged_input_features_outside_buffer_{buffer_distances[1]}.shp')
 
 def separate_features(changing_features, buffers):
+    global context
     # Loop over the changing features
     for changing_feature, file_base_name in changing_features:
         # Ensure the changing feature has the same CRS as the buffers
         changing_feature = changing_feature.to_crs(CRS)
         # Calculate intersections
+        context = 'intersects with Buffer <100'
         changing_feature_B1_intersection = gpd.overlay(
             changing_feature, buffers[0], how='intersection')
         changing_feature_B1_intersection = process_geometries(
@@ -268,6 +276,7 @@ def separate_features(changing_features, buffers):
             changing_feature_B1_intersection.to_file(
                 f'{DEBUG_DIR}/1_{file_base_name}_B1_intersection.shp')
 
+        context = 'intersects with Buffer >100 <625'
         changing_feature_B2_intersection = gpd.overlay(
             changing_feature, buffers[1], how='intersection')
         changing_feature_B2_intersection = process_geometries(
@@ -277,6 +286,7 @@ def separate_features(changing_features, buffers):
                 f'{DEBUG_DIR}/2_{file_base_name}_B2_intersection.shp')
 
         # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
+        context = 'intersects with Buffer >100 <625 but not Buffer <100'
         changing_feature_B2_not_B1 = gpd.overlay(
             changing_feature_B2_intersection, changing_feature_B1_intersection, how='difference')
         changing_feature_B2_not_B1 = process_geometries(
@@ -290,6 +300,7 @@ def separate_features(changing_features, buffers):
         changing_feature_B2_not_B1_area = changing_feature_B2_not_B1.area.sum()
 
         # Calculate area outside B2
+        context = 'outside Buffer >625'
         changing_feature_outside_B2 = gpd.overlay(
             changing_feature, buffers[1], how='difference')
         if args.debug:
@@ -308,11 +319,11 @@ def separate_features(changing_features, buffers):
 
         # Print the results
         print(
-            f"Area of changing feature {file_base_name} intersecting with Buffer <{buffer_distances[0]}: {changing_feature_B1_area}")
+            f"Area of changing feature {file_base_name} intersecting with Buffer <{buffer_distances[0]}: {round(changing_feature_B1_area)}")
         print(
-            f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_distances[1]} but not {buffer_distances[0]}: {changing_feature_B2_not_B1_area}")
+            f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_distances[1]} but not {buffer_distances[0]}: {round(changing_feature_B2_not_B1_area)}")
         print(
-            f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {changing_feature_outside_B2_area}")
+            f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {round(changing_feature_outside_B2_area)}")
 
         # Create new shapes of all of the above
         if changing_feature_B1_intersection.area.sum() > 0:
