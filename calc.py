@@ -1,3 +1,4 @@
+from shapely import wkt
 from shapely.ops import unary_union
 from shapely.geometry import MultiPolygon
 import re
@@ -315,28 +316,69 @@ def add_protected_area_value(feature, protected_area_features):
     return feature
 
 
+def resolve_overlaps(feature):
+    # Sort features by 'lagefaktor' so that we iterate from highest to lowest
+    feature = feature.sort_values(by='lagefaktor', ascending=False)
+
+    resolved_geometries = gpd.GeoDataFrame(columns=feature.columns)
+    for index, row in feature.iterrows():
+        current_geom = row.geometry
+        # Create a temporary GeoDataFrame for the current row to facilitate the use of concat
+        temp_gdf = gpd.GeoDataFrame([row], columns=feature.columns)
+
+        # Check for intersections with already resolved geometries (those with higher 'lagefaktor')
+        for _, r_geom in resolved_geometries.iterrows():
+            if current_geom.intersects(r_geom.geometry):
+                # If there's an intersection, difference the current geometry with the higher 'lagefaktor' geometry
+                current_geom = current_geom.difference(r_geom.geometry)
+
+        # If there's any geometry left after resolving intersections, add it to the resolved geometries
+        if not current_geom.is_empty:
+            # Update the geometry in the temporary GeoDataFrame
+            temp_gdf.geometry = [current_geom]
+            resolved_geometries = pd.concat(
+                [resolved_geometries, temp_gdf], ignore_index=True)
+
+    return resolved_geometries
+
+
 def add_lagefaktor_values(feature, lagefaktor_value):
     # Add a new column 'lagefaktor'
     feature['lagefaktor'] = feature.apply(lambda row: row['protected'] if pd.notnull(
         row['protected']) else lagefaktor_value, axis=1)
 
-    # Create a list to store the flattened polygons
-    flattened_features = []
+    # Assuming 'feature' is a GeoDataFrame and already has a geometry column,
+    # there's no need to create a combined 'data' column for dissolving based on geometry.
+    # Instead, directly dissolve based on 'lagefaktor' to handle overlapping polygons.
 
-    # Loop over each unique 'lagefaktor' value
-    for lagefaktor in feature['lagefaktor'].unique():
-        # Get the polygons with the current 'lagefaktor' value
-        polygons = feature[feature['lagefaktor'] == lagefaktor]
+    # Dissolve polygons based on 'lagefaktor', taking the first (or max, depending on your requirement) value for each group
+    # Note: Adjust the aggregation function as needed. Here, we're using 'first' for simplicity.
+    flattened_feature = feature.dissolve(by='lagefaktor', aggfunc='first')
 
-        # Flatten the polygons and add them to 'flattened_features'
-        flattened_polygons = unary_union(polygons['geometry'])
-        flattened_features.append(gpd.GeoDataFrame({'geometry': [
-                                  flattened_polygons], 'lagefaktor': [lagefaktor]}, columns=feature.columns))
+    # If you have specific columns you want to aggregate differently, you can pass a dictionary to aggfunc. For example:
+    # flattened_feature = feature.dissolve(by='lagefaktor', aggfunc={'column1': 'first', 'column2': 'sum', ...})
 
-    # Concatenate the flattened features into a single GeoDataFrame
-    flattened_feature = pd.concat(flattened_features, ignore_index=True)
+    # No need to reset index if you want 'lagefaktor' to remain as the index, but if you want it as a column, then reset the index.
+    flattened_feature.reset_index(inplace=True)
 
-    return flattened_feature
+    # Ensure any geometry columns are correctly recognized as such (this should be automatic in GeoPandas, but just in case)
+    # This step assumes 'geometry' is the name of your geometry column. If it's different, adjust accordingly.
+    if 'geometry' not in flattened_feature.columns:
+        # If your geometry column has a different name, set it here
+        flattened_feature = flattened_feature.set_geometry(
+            'your_geometry_column_name')
+    else:
+        # Usually, this step is not necessary as GeoPandas automatically handles geometry columns after operations like dissolve.
+        pass
+
+    # Sort the GeoDataFrame by 'lagefaktor' in descending order, if needed
+    flattened_feature.sort_values(
+        by='lagefaktor', ascending=False, inplace=True)
+
+    # Assuming 'gdf' is your GeoDataFrame with a 'lagefaktor' column and a 'geometry' column
+    resolved_gdf = resolve_overlaps(flattened_feature)
+
+    return resolved_gdf
 
 
 def add_compensatory_measure_value(feature, compensatory_features):
