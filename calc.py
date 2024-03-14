@@ -21,6 +21,11 @@ parser.add_argument('--debug', action='store_true', help='enable debug mode')
 # Parse the arguments
 args = parser.parse_args()
 
+# Set the coordinate reference system (CRS) to EPSG 25833
+CRS = 'epsg:25833'
+
+GRZ = [0.5, 0.2, 0.6]
+
 # Now the directory name is available as args.DirName
 DATA_DIR = './DATA'
 CHANGING_DIR = f'{DATA_DIR}/{args.DirName}/changing'
@@ -56,9 +61,6 @@ for file in glob.glob(f'{OUTPUT_DIR}/*'):
 for file in glob.glob(f'{DEBUG_DIR}/*'):
     os.remove(file)
 
-
-# Set the coordinate reference system (CRS) to EPSG 25833
-CRS = 'epsg:25833'
 
 # craete dirs if not exist
 os.makedirs(CHANGING_DIR, exist_ok=True)
@@ -407,7 +409,6 @@ def add_lagefaktor_values(feature, lagefaktor_value):
 
 
 def add_compensatory_measure_value(feature, compensatory_features):
-
     # If no intersection found or no compensatory_features
     feature['compensat'] = 1
     if compensatory_features:
@@ -538,8 +539,8 @@ def separate_features(changing_features, buffers, protected_area_features, compe
     #     changing_feature_outside_B2)
     changing_feature_outside_B2 = process_geodataframes(
         changing_feature_outside_B2, protected_area_features)
-    # changing_feature_outside_B2 = add_lagefaktor_values(
-    #     changing_feature_outside_B2, LAGEFAKTOR_VALUES['>625'])
+    changing_feature_outside_B2 = add_lagefaktor_values(
+        changing_feature_outside_B2, LAGEFAKTOR_VALUES['>625'])
 
     # Calculate area
     changing_feature_outside_B2_area = calculate_area(
@@ -552,6 +553,23 @@ def separate_features(changing_features, buffers, protected_area_features, compe
     # Print the results
     print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
                   changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
+
+    # List of features
+    features = [changing_feature_B1_intersection,
+                changing_feature_B2_not_B1, changing_feature_outside_B2]
+
+    # Calculate the final value for each feature and summarize them
+    total_final_value = 0
+    for feature in features:
+        feature['final_value'] = feature['base_value'] * \
+            feature['lagefaktor'] * feature.geometry.area
+        total_final_value += feature['final_value'].sum()
+
+    total_final_value = (
+        (total_final_value * GRZ[0]) * GRZ[1]) + ((total_final_value * GRZ[0]) * GRZ[2])
+    total_final_value = round(total_final_value, 2)
+
+    print("Total final value: ", total_final_value)
 
     return [
         {'shape': changing_feature_B1_intersection,
