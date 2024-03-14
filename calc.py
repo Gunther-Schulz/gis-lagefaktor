@@ -33,8 +33,8 @@ BUFFER_DISTANCES = (100, 625)
 BASE_VALUES = {'Acker': 1, 'Grünland': 1, 'Weg': 1, 'weg': 1, 'Baufeld': 1}
 LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1.0, '>625': 1.25}
 PROTECTED_AREA_VALUES = {'high': 1.25,
-                         'very_high': 1.5, 'VSG': 10}
-COMPENSATORY_MEASURES_AREA_VALUES = {'Grünfläche': 2}
+                         'very_high': 1.5, 'VSG': 1.25, 'Test': 10, 'Test2': 20}
+COMPENSATORY_MEASURES_AREA_VALUES = {'Grünfläche': 3}
 
 
 # Create all directories
@@ -48,9 +48,9 @@ os.makedirs(COMPENSATORY_MEASURES_DIR, exist_ok=True)
 os.makedirs(PROTECTED_AREA_DIR, exist_ok=True)
 
 # Remove all files from output and debug dirs
-for file in glob.glob(f'{OUTPUT_DIR}/*.shp'):
+for file in glob.glob(f'{OUTPUT_DIR}/*'):
     os.remove(file)
-for file in glob.glob(f'{DEBUG_DIR}/*.shp'):
+for file in glob.glob(f'{DEBUG_DIR}/*'):
     os.remove(file)
 
 
@@ -317,7 +317,6 @@ def add_lagefaktor_values(feature, protected_area_features, lagefaktor_value):
     # Convert feature to a GeoDataFrame if it's not already
     if not isinstance(feature, gpd.GeoDataFrame):
         feature = gpd.GeoDataFrame([feature])
-    print(8, 1)
 
     # Iterate over each row in the feature DataFrame
     for i, row in feature.iterrows():
@@ -325,23 +324,21 @@ def add_lagefaktor_values(feature, protected_area_features, lagefaktor_value):
         row_gdf = gpd.GeoDataFrame([row], geometry='geometry')
         # set CRS
         row_gdf.crs = CRS
-        print(8, 2)
         # Add protected_area_value to the row
         row = add_protected_area_value(row_gdf, protected_area_features)
-        print(8, 3)
         protected_area_value = row['protected'].item()
-        print(8, 4)
 
         # If protected_area_value is greater than 1 and lagefaktor_value equals '<100'
         if protected_area_value > 1 and lagefaktor_value == LAGEFAKTOR_VALUES['<100']:
             # Decrease lagefaktor_value by 0.25
             lagefaktor_value = lagefaktor_value - 0.25
-        print(8, 5)
         # Update 'lagefaktor' and 'protected' in the original DataFrame
-        feature.loc[i, 'lagefaktor'] = lagefaktor_value
-        print(8, 6)
+        feature.loc[i, 'distance_f'] = lagefaktor_value
         feature.loc[i, 'protected'] = protected_area_value
-        print(8, 7)
+        area = row['geometry'].area.item()
+        print("area:", area)
+        feature.loc[i, 'lagefaktor'] = lagefaktor_value * \
+            protected_area_value * area
     return feature
 
 
@@ -376,9 +373,45 @@ def calculate_finals(feature):
     return feature
 
 
-def lagefaktor_features(changing_features, buffers, protected_area_features, compensatory_features):
+def process_geodataframes(changing_feature, protected_area_features):
+    # Create separate polygons wherever changing_feature_B1_intersection overlaps with protected_area_features
+    overlapping_areas = gpd.overlay(
+        changing_feature, protected_area_features, how='intersection')
+
+    # Get the parts of changing_feature_B1_intersection that don't overlap with protected_area_features
+    non_overlapping_areas = gpd.overlay(
+        changing_feature, protected_area_features, how='difference')
+
+    # Combine overlapping_areas and non_overlapping_areas and keep separate polygons
+    changing_feature = gpd.overlay(
+        non_overlapping_areas, overlapping_areas, how='union')
+
+    # Consolidate the 'file_name' columns
+    changing_feature['file_name'] = changing_feature['file_name'].combine_first(
+        changing_feature['file_name_1']).combine_first(changing_feature['file_name_2'])
+
+    # Consolidate the 'base_value' columns
+    changing_feature['base_value'] = changing_feature['base_value_1'].combine_first(
+        changing_feature['base_value_2'])
+
+    # Consolidate the 'protected' column
+    changing_feature['protected'] = changing_feature['protected'].combine_first(
+        changing_feature['id'])
+
+    # Drop the redundant columns
+    changing_feature = changing_feature.drop(
+        columns=['file_name_1', 'file_name_2', 'base_value_1', 'base_value_2', 'id'])
+
+    return changing_feature
+
+
+def separate_features(changing_features, buffers, protected_area_features, compensatory_features):
     global context
     file_name = changing_features['file_name'][0]
+    print("1 protected_area_features:", protected_area_features)
+    # Convert protected_area_features to a single GeoDataFrame
+    protected_area_features = pd.concat(protected_area_features)
+    print("2 protected_area_features:", protected_area_features)
 
     # Loop over the changing features
     # Ensure the changing feature has the same CRS as the buffers
@@ -387,48 +420,64 @@ def lagefaktor_features(changing_features, buffers, protected_area_features, com
     changing_feature_B1_intersection = calculate_intersection(
         changing_features, buffers[0], 'intersects with Buffer <100', file_name)
     print(8)
-    changing_feature_B1_intersection = add_lagefaktor_values(
-        changing_feature_B1_intersection, protected_area_features, LAGEFAKTOR_VALUES['<100'])
-    print(9)
-    changing_feature_B1_intersection = add_compensatory_measure_value(
-        changing_feature_B1_intersection, compensatory_features)
-    print(10)
-    changing_feature_B1_intersection = calculate_finals(
-        changing_feature_B1_intersection)
-    print(11)
+    changing_feature_B1_intersection = process_geodataframes(
+        changing_feature_B1_intersection, protected_area_features)
+
+    # changing_feature_B1_intersection = add_lagefaktor_values(
+    #     changing_feature_B1_intersection, protected_area_features, LAGEFAKTOR_VALUES['<100'])
+    # print(9)
+    # changing_feature_B1_intersection = add_compensatory_measure_value(
+    #     changing_feature_B1_intersection, compensatory_features)
+    # print(10)
+    # changing_feature_B1_intersection = calculate_finals(
+    #     changing_feature_B1_intersection)
+    # print(11)
 
     changing_feature_B2_intersection = calculate_intersection(
         changing_features, buffers[1], 'intersects with Buffer >100 <625', file_name)
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
     changing_feature_B2_not_B1 = calculate_difference(
         changing_feature_B2_intersection, changing_feature_B1_intersection, 'intersects with Buffer >100 <625 but not Buffer <100', file_name)
-    changing_feature_B2_not_B1 = add_lagefaktor_values(
-        changing_feature_B2_not_B1, protected_area_features, LAGEFAKTOR_VALUES['>100<625'])
-    changing_feature_B2_not_B1 = add_compensatory_measure_value(
-        changing_feature_B2_not_B1, compensatory_features)
-    changing_feature_B2_not_B1 = calculate_finals(
-        changing_feature_B2_not_B1)
+    # changing_feature_B2_not_B1 = add_lagefaktor_values(
+    #     changing_feature_B2_not_B1, protected_area_features, LAGEFAKTOR_VALUES['>100<625'])
+    # changing_feature_B2_not_B1 = add_compensatory_measure_value(
+    #     changing_feature_B2_not_B1, compensatory_features)
+    # changing_feature_B2_not_B1 = calculate_finals(
+    #     changing_feature_B2_not_B1)
+    overlapping_areas = gpd.overlay(
+        changing_feature_B2_not_B1, protected_area_features, how='intersection')
 
-    changing_feature_B1_area = calculate_area(
-        changing_feature_B1_intersection)
-    changing_feature_B2_not_B1_area = calculate_area(
-        changing_feature_B2_not_B1)
+    non_overlapping_areas = gpd.overlay(
+        changing_feature_B2_not_B1, protected_area_features, how='difference')
+    changing_feature_B2_not_B1 = gpd.overlay(
+        non_overlapping_areas, overlapping_areas, how='union')
+
     # Calculate area outside B2
     changing_feature_outside_B2 = calculate_difference(
         changing_features, buffers[1], 'outside Buffer >625', file_name)
-    changing_feature_outside_B2 = add_lagefaktor_values(
-        changing_feature_outside_B2, protected_area_features, LAGEFAKTOR_VALUES['>625'])
-    changing_feature_outside_B2 = add_compensatory_measure_value(
-        changing_feature_outside_B2, compensatory_features)
-    changing_feature_outside_B2 = calculate_finals(
-        changing_feature_outside_B2)
+    # changing_feature_outside_B2 = add_lagefaktor_values(
+    #     changing_feature_outside_B2, protected_area_features, LAGEFAKTOR_VALUES['>625'])
+    # changing_feature_outside_B2 = add_compensatory_measure_value(
+    #     changing_feature_outside_B2, compensatory_features)
+    # changing_feature_outside_B2 = calculate_finals(
+    #     changing_feature_outside_B2)
+    overlapping_areas = gpd.overlay(
+        changing_feature_outside_B2, protected_area_features, how='intersection')
+    non_overlapping_areas = gpd.overlay(
+        changing_feature_outside_B2, protected_area_features, how='difference')
+    changing_feature_outside_B2 = gpd.overlay(
+        non_overlapping_areas, overlapping_areas, how='union')
 
     # Calculate area
     changing_feature_outside_B2_area = calculate_area(
         changing_feature_outside_B2)
+    changing_feature_B2_not_B1_area = calculate_area(
+        changing_feature_B2_not_B1)
+    changing_feature_B1_intersection_area = calculate_area(
+        changing_feature_B1_intersection)
 
     # Print the results
-    print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_area,
+    print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
                   changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
 
     return [
@@ -489,7 +538,7 @@ protected_area_features = preprocess_protected_area_features(
 print(6)
 output_shapes = []
 for changing_feature in changing_features:
-    output_shapes.append(lagefaktor_features(
+    output_shapes.append(separate_features(
         changing_feature, buffers, protected_area_features, compensatory_features))
 
 for shapes in output_shapes:
