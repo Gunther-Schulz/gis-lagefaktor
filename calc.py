@@ -365,6 +365,10 @@ def add_lagefaktor_values(feature, lagefaktor_value):
     feature['lagefaktor'] = feature.apply(lambda row: row['protected'] if pd.notnull(
         row['protected']) else lagefaktor_value, axis=1)
 
+    # If lagefaktor_value is 0.75, reduce the final 'lagefaktor' value by 0.25
+    if lagefaktor_value == LAGEFAKTOR_VALUES['<100']:
+        feature['lagefaktor'] = feature['lagefaktor'] - 0.25
+
     # Assuming 'feature' is a GeoDataFrame and already has a geometry column,
     # there's no need to create a combined 'data' column for dissolving based on geometry.
     # Instead, directly dissolve based on 'lagefaktor' to handle overlapping polygons.
