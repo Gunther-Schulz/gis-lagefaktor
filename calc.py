@@ -342,6 +342,24 @@ def resolve_overlaps(feature):
     return resolved_geometries
 
 
+def remove_slivers(gdf, buffer_distance=0.0001):
+    """
+    Apply a small buffer to fill in slivers and then reverse the buffer.
+    Note: The buffer distance should be chosen based on the coordinate system of your GeoDataFrame.
+    A very small value is usually sufficient and should be adjusted according to your specific needs.
+    """
+    # Apply a small buffer to fill in slivers
+    buffered_gdf = gdf.buffer(buffer_distance)
+
+    # Reverse the buffer to return to original size
+    unbuffered_gdf = buffered_gdf.buffer(-buffer_distance)
+
+    # Update the original GeoDataFrame geometries
+    gdf.geometry = unbuffered_gdf
+
+    return gdf
+
+
 def add_lagefaktor_values(feature, lagefaktor_value):
     # Add a new column 'lagefaktor'
     feature['lagefaktor'] = feature.apply(lambda row: row['protected'] if pd.notnull(
@@ -377,6 +395,9 @@ def add_lagefaktor_values(feature, lagefaktor_value):
 
     # Assuming 'gdf' is your GeoDataFrame with a 'lagefaktor' column and a 'geometry' column
     resolved_gdf = resolve_overlaps(flattened_feature)
+
+    # Remove slivers
+    resolved_gdf = remove_slivers(resolved_gdf, 0.001)
 
     return resolved_gdf
 
