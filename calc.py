@@ -69,8 +69,11 @@ context = None
 
 def custom_warning(message, category, filename, lineno, file=None, line=None):
     no_buffer_pattern = r"`?keep_geom_type=True`? in overlay resulted in .* dropped geometries of .* than .*\. Set `?keep_geom_type=False`? to retain all geometries"
-    match = re.search(no_buffer_pattern, str(message))
-    if match:
+    keepdims_pattern = r"<class 'geopandas.array.GeometryArray'>._reduce will require a `keepdims` parameter in the future"
+    match_no_buffer = re.search(no_buffer_pattern, str(message))
+    match_keepdims = re.search(keepdims_pattern, str(message))
+
+    if match_no_buffer:
         if context == 'outside Buffer >625':
             print(
                 'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
@@ -85,7 +88,8 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
                 'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
         else:
             print('Custom Warning: ' + str(message))
-    else:
+    elif not match_keepdims:
+        # Only print the warning if it's not the 'keepdims' warning
         print('Custom Warning: ' + str(message))
 
 
@@ -115,6 +119,7 @@ def create_buffer(distance):
     B = gpd.GeoDataFrame(
         pd.concat(temp_buffers, ignore_index=True), geometry=0)
     B = B.dissolve()  # TODO: should we do this?
+    B.crs = CRS
     return B
 
 
@@ -145,6 +150,9 @@ def get_features(dir):
         features.append(feature)
         print(f"CRS of {file_base_name}: {feature.crs}")
 
+    for feature in features:
+        # Ensure each feature has the correct CRS
+        feature.set_crs(CRS, inplace=True)
     return features
 
 
@@ -167,6 +175,7 @@ def cleanup_and_merge(feature, buffer_distance):
     # Reset the index of the original string columns and the geometry GeoDataFrame
     original_string_columns.reset_index(drop=True, inplace=True)
     geometry.reset_index(drop=True, inplace=True)
+    geometry.crs = CRS
 
     # Merge the new geometry with the original string columns
     return pd.concat([geometry, original_string_columns], axis=1)
@@ -211,7 +220,7 @@ def preprocess_protected_area_features(protected_area_features):
     return cleaned_protected_area_features
 
 
-def preprocess_base_features(changing_features, unchanged_features):
+def preprocess_base_features(changing_features, unchanged_features, values):
 
     cleaned_changing_features = []
 
@@ -235,7 +244,7 @@ def preprocess_base_features(changing_features, unchanged_features):
                 changing_feature.to_file(
                     f'{DEBUG_DIR}/2_{file_name}_punched_holes.shp')
 
-        changing_feature['base_value'] = CONSTRUCTION_BASE_VALUES[file_name]
+        changing_feature['base_value'] = values[file_name]
         cleaned_changing_features.append(changing_feature)
 
     return cleaned_changing_features
@@ -327,10 +336,17 @@ def resolve_overlaps(feature, sort_by):
         if not current_geom.is_empty:
             # Update the geometry in the temporary GeoDataFrame
             temp_gdf.geometry = [current_geom]
+
+            # Drop columns that are entirely NA or empty in both DataFrames before concatenating
+            resolved_geometries = resolved_geometries.dropna(how='all', axis=1)
+            temp_gdf = temp_gdf.dropna(how='all', axis=1)
+
             resolved_geometries = pd.concat(
                 [resolved_geometries, temp_gdf], ignore_index=True)
     # Explode any MultiPolygon geometries into individual Polygon geometries
-    resolved_geometries = resolved_geometries.explode()
+    # Explode any MultiPolygon geometries into individual Polygon geometries
+    resolved_geometries = resolved_geometries.explode(index_parts=True)
+    resolved_geometries.crs = CRS
 
     return resolved_geometries
 
@@ -349,6 +365,7 @@ def remove_slivers(gdf, buffer_distance=0.0001):
 
     # Update the original GeoDataFrame geometries
     gdf.geometry = unbuffered_gdf
+    gdf.crs = CRS
 
     return gdf
 
@@ -415,9 +432,13 @@ def process_geodataframes(base_feature, cover_features):
     overlapping_areas = gpd.overlay(
         base_feature, cover_features, how='intersection')
 
+    overlapping_areas.crs = CRS
+
     # Get the parts of changing_feature that don't overlap with protected_area_features
     non_overlapping_areas = gpd.overlay(
         base_feature, cover_features, how='difference')
+
+    non_overlapping_areas.crs = CRS
 
     # Combine overlapping_areas and non_overlapping_areas and keep separate polygons
     base_feature = gpd.overlay(
@@ -515,9 +536,9 @@ def calculate_total_final_value(feature_dicts_list, grz):
     for feature_dicts in feature_dicts_list:
         for feature_dict in feature_dicts:
             feature = feature_dict['shape']
-            feature['final_value'] = feature['base_value'] * \
+            feature['final_val'] = feature['base_value'] * \
                 feature['lagefaktor'] * feature.geometry.area
-            total_final_value += feature['final_value'].sum()
+            total_final_value += feature['final_val'].sum()
 
     total_final_value = (
         (total_final_value * grz_f[0]) * grz_f[1]) + ((total_final_value * grz_f[0]) * grz_f[2])
@@ -553,6 +574,8 @@ def process_geometries(changing_feature_outside_B2):
     changing_feature_outside_B2 = changing_feature_outside_B2.reset_index(
         drop=True)
 
+    changing_feature_outside_B2.crs = CRS
+
     return changing_feature_outside_B2
 
 
@@ -560,9 +583,12 @@ buffers = get_buffers(BUFFER_DISTANCES)
 changing_features = get_features(CONSTRUCTION_DIR)
 unchanging_features = get_features(UNCHANGING_DIR)
 changing_features = preprocess_base_features(
-    changing_features, unchanging_features)
+    changing_features, unchanging_features, CONSTRUCTION_BASE_VALUES)
 compensatory_features = get_features(COMPENSATORY_DIR)
 compensatory_features = preprocess_compensatory_features(compensatory_features)
+# compensatory_features = preprocess_base_features(
+#     compensatory_features, unchanging_features, COMPENSATORY_BASE_VALUES)
+# print("compensatory_features", compensatory_features)
 protected_area_features = get_features(PROTECTED_DIR)
 protected_area_features = preprocess_protected_area_features(
     protected_area_features)
@@ -571,9 +597,9 @@ for changing_feature in changing_features:
     output_shapes.append(separate_features(
         changing_feature, buffers, protected_area_features, compensatory_features))
 
-for shapes in output_shapes:
-    for shape in shapes:
-        print(shape['shape'])
+# for shapes in output_shapes:
+#     for shape in shapes:
+#         print(shape['shape'])
 # print(output_shapes[0][0]['shape'])
 
 total_final_value = calculate_total_final_value(output_shapes, GRZ)
@@ -582,8 +608,14 @@ print(f"Total final value: {total_final_value}")
 # create shapes
 for shapes in output_shapes:
     for lagefaktor_shape in shapes:
+        # Check if any column name is longer than 10 characters
+        for column in lagefaktor_shape['shape'].columns:
+            if len(column) > 10:
+                print(
+                    f"Warning: Column name '{column}' is longer than 10 characters.")
+
         if lagefaktor_shape is shapes[-1]:
-            lagefaktor_shape['file_base_name'] = lagefaktor_shape['file_base_name'] + \
-                '_over'
+            lagefaktor_shape['file_base_name'] = lagefaktor_shape['file_base_name'] + '_over'
+
         create_lagefaktor_shapes(
             lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
