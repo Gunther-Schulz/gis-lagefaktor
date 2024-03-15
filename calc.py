@@ -150,10 +150,19 @@ def get_features(dir):
         features.append(feature)
         print(f"CRS of {file_base_name}: {feature.crs}")
 
-    for feature in features:
-        # Ensure each feature has the correct CRS
-        feature.set_crs(CRS, inplace=True)
-    return features
+    # Check if the list is empty
+    if not features:
+        print(f"No shapefiles found in directory {dir}")
+        # Return an empty GeoDataFrame with the same columns
+        return gpd.GeoDataFrame(columns=['geometry', 'file_name'], crs=CRS)
+
+    # Concatenate all GeoDataFrames in the list into a single GeoDataFrame
+    features_gdf = pd.concat(features, ignore_index=True)
+
+    # Ensure the resulting GeoDataFrame has the correct CRS
+    features_gdf.set_crs(CRS, inplace=True)
+
+    return features_gdf
 
 
 def cleanup_and_merge(feature, buffer_distance):
@@ -182,72 +191,42 @@ def cleanup_and_merge(feature, buffer_distance):
 
 
 def preprocess_compensatory_features(compensatory_features):
-    cleaned_compensatory_features = []
-
-    # Buffer distance
-    buffer_distance = 10  # You can adjust this value as needed
-
-    # Buffer all features in compensatory_features
-    for compensatory_feature in compensatory_features:
-        compensatory_feature = cleanup_and_merge(
-            compensatory_feature, buffer_distance)
-        file_name = compensatory_feature['file_name'][0]
-        # add compensatory_measure_area_value to feature
-        compensatory_feature['compensat'] = COMPENSATORY_BASE_VALUES[file_name]
-        cleaned_compensatory_features.append(compensatory_feature)
-
+    cleaned_compensatory_features = cleanup_and_merge(
+        compensatory_features, buffer_distance=10)
+    file_name = compensatory_features['file_name'].iloc[0]
+    cleaned_compensatory_features['compensat'] = COMPENSATORY_BASE_VALUES[file_name]
     return cleaned_compensatory_features
 
 
 def preprocess_protected_area_features(protected_area_features):
-    cleaned_protected_area_features = []
-
-    # Buffer distance
-    buffer_distance = 10  # You can adjust this value as needed
-
-    # Buffer all features in compensatory_features
-    for protected_area_feature in protected_area_features:
-        protected_area_feature = cleanup_and_merge(
-            protected_area_feature, buffer_distance)
-        file_name = protected_area_feature['file_name'][0]
-        # add compensatory_measure_area_value to feature
-        protected_area_feature['protected'] = CONSTRUCTION_PROTECTED_VALUES[file_name]
-        cleaned_protected_area_features.append(protected_area_feature)
-
-    # TODO: why do i need to concatenate here? And not any of the other places?
-    cleaned_protected_area_features = pd.concat(
-        cleaned_protected_area_features, ignore_index=True)
-    return cleaned_protected_area_features
+    # Iterate over each row in the GeoDataFrame
+    for index, row in protected_area_features.iterrows():
+        # Get the 'file_name' for the current row
+        file_name = row['file_name']
+        # Set the 'protected' value for the current row
+        protected_area_features.at[index,
+                                   'protected'] = CONSTRUCTION_PROTECTED_VALUES[file_name]
+    return protected_area_features
 
 
 def preprocess_base_features(changing_features, unchanged_features, values):
+    cleaned_changing_features = cleanup_and_merge(
+        changing_features, buffer_distance=10)
+    file_name = changing_features['file_name'].iloc[0]
 
-    cleaned_changing_features = []
+    # Buffer, dissolve and reduce buffer for unchanged_features
+    unchanged_features = cleanup_and_merge(
+        unchanged_features, buffer_distance=10)
 
-    # Buffer distance
-    buffer_distance = 10  # You can adjust this value as needed
+    # punch holes
+    changing_features = gpd.overlay(
+        changing_features, unchanged_features, how='difference')
+    if args.debug:
+        changing_features.to_file(
+            f'{DEBUG_DIR}/2_{file_name}_punched_holes.shp')
 
-    # Buffer all features in changing_features
-    for changing_feature in changing_features:
-        changing_feature = cleanup_and_merge(changing_feature, buffer_distance)
-        file_name = changing_feature['file_name'][0]
-
-        # Buffer, dissolve and reduce buffer for unchanged_features
-        for unchanged_feature in unchanged_features:
-            unchanged_feature = cleanup_and_merge(
-                unchanged_feature, buffer_distance)
-
-            # punch holes
-            changing_feature = gpd.overlay(
-                changing_feature, unchanged_feature, how='difference')
-            if args.debug:
-                changing_feature.to_file(
-                    f'{DEBUG_DIR}/2_{file_name}_punched_holes.shp')
-
-        changing_feature['base_value'] = values[file_name]
-        cleaned_changing_features.append(changing_feature)
-
-    return cleaned_changing_features
+    changing_features['base_value'] = values[file_name]
+    return changing_features
 
 
 def calculate_intersection(changing_feature, buffer, context, file_base_name):
@@ -292,28 +271,28 @@ def create_lagefaktor_shapes(changing_feature, file_base_name, buffer_distance):
             f'{OUTPUT_DIR}/{file_base_name}_buffer_{buffer_distance}_intersection.shp')
 
 
-def add_protected_area_value(feature, protected_area_features):
-    # Initialize 'protected' column with 1
-    feature['protected'] = 1
+# def add_protected_area_value(feature, protected_area_features):
+#     # Initialize 'protected' column with 1
+#     feature['protected'] = 1
 
-    # Iterate over each protected_area_feature
-    for protected_area_feature in protected_area_features:
-        # Get the file_name from the first row of each protected_area_feature
-        file_name = protected_area_feature['file_name'].iloc[0]
-        does_intersect = False
-        for _, row in feature.iterrows():
-            for _, protected_row in protected_area_feature.iterrows():
-                if row['geometry'].intersects(protected_row['geometry']):
-                    does_intersect = True
-                    break
-            if does_intersect:
-                break
-        # If the feature intersects with the protected_area_feature
-        if does_intersect:
-            # Update 'protected' with the corresponding value from PROTECTED_AREA_VALUES
-            feature['protected'] = CONSTRUCTION_PROTECTED_VALUES[file_name]
-            return feature
-    return feature
+#     # Iterate over each protected_area_feature
+#     for protected_area_feature in protected_area_features:
+#         # Get the file_name from the first row of each protected_area_feature
+#         file_name = protected_area_feature['file_name'].iloc[0]
+#         does_intersect = False
+#         for _, row in feature.iterrows():
+#             for _, protected_row in protected_area_feature.iterrows():
+#                 if row['geometry'].intersects(protected_row['geometry']):
+#                     does_intersect = True
+#                     break
+#             if does_intersect:
+#                 break
+#         # If the feature intersects with the protected_area_feature
+#         if does_intersect:
+#             # Update 'protected' with the corresponding value from PROTECTED_AREA_VALUES
+#             feature['protected'] = CONSTRUCTION_PROTECTED_VALUES[file_name]
+#             return feature
+#     return feature
 
 
 def resolve_overlaps(feature, sort_by):
@@ -397,16 +376,12 @@ def add_lagefaktor_values(feature, lagefaktor_value):
     return resolved_gdf
 
 
-# def add_compensatory_measure_value(feature, compensatory_features):
-#     # If no intersection found or no compensatory_features
-#     feature['compensat'] = 1
-#     if compensatory_features:
-#         for compensatory_feature in compensatory_features:
-#             file_name = compensatory_feature['file_name'][0]
-#             if feature.intersects(compensatory_feature).any():
-#                 feature['compensat'] = COMPENSATORY_MEASURES_AREA_VALUES[file_name]
-#                 return feature
-#     return feature
+def add_compensatory_value(compensatory_features):
+    # Add a new column 'compensat'
+    compensatory_features['compensat'] = compensatory_features.apply(
+        lambda row: COMPENSATORY_BASE_VALUES[row['file_name']], axis=1)
+
+    return compensatory_features
 
 
 def calculate_finals(feature):
@@ -476,20 +451,20 @@ def process_geodataframes(base_feature, cover_features):
     return base_feature
 
 
-def separate_features(changing_features, buffers, protected_area_features, compensatory_features):
+def separate_features(changing_feature, buffers, protected_area_features):
     global context
-    file_name = changing_features['file_name'][0]
+    file_name = changing_feature['file_name'].iloc[0]
 
     # Calculate intersections
     changing_feature_B1_intersection = calculate_intersection(
-        changing_features, buffers[0], 'intersects with Buffer <100', file_name)
+        changing_feature, buffers[0], 'intersects with Buffer <100', file_name)
     changing_feature_B1_intersection = process_geodataframes(
         changing_feature_B1_intersection, protected_area_features)
     changing_feature_B1_intersection = add_lagefaktor_values(
         changing_feature_B1_intersection, LAGEFAKTOR_VALUES['<100'])
 
     changing_feature_B2_intersection = calculate_intersection(
-        changing_features, buffers[1], 'intersects with Buffer >100 <625', file_name)
+        changing_feature, buffers[1], 'intersects with Buffer >100 <625', file_name)
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
     changing_feature_B2_not_B1 = calculate_difference(
         changing_feature_B2_intersection, changing_feature_B1_intersection,
@@ -501,7 +476,7 @@ def separate_features(changing_features, buffers, protected_area_features, compe
 
     # Calculate area outside B2
     changing_feature_outside_B2 = calculate_difference(
-        changing_features, buffers[1], 'outside Buffer >625', file_name)
+        changing_feature, buffers[1], 'outside Buffer >625', file_name)
     changing_feature_outside_B2 = process_geodataframes(
         changing_feature_outside_B2, protected_area_features)
     changing_feature_outside_B2 = add_lagefaktor_values(
@@ -529,16 +504,15 @@ def separate_features(changing_features, buffers, protected_area_features, compe
     ]
 
 
-def calculate_total_final_value(feature_dicts_list, grz):
+def calculate_total_final_value(dicts_list, grz):
     # Calculate the final value for each feature and summarize them
     grz_f = GRZ_FACTORS[grz]
     total_final_value = 0
-    for feature_dicts in feature_dicts_list:
-        for feature_dict in feature_dicts:
-            feature = feature_dict['shape']
-            feature['final_val'] = feature['base_value'] * \
-                feature['lagefaktor'] * feature.geometry.area
-            total_final_value += feature['final_val'].sum()
+    for feature_dict in dicts_list:
+        feature = feature_dict['shape']
+        feature['final_val'] = feature['base_value'] * \
+            feature['lagefaktor'] * feature.geometry.area
+        total_final_value += feature['final_val'].sum()
 
     total_final_value = (
         (total_final_value * grz_f[0]) * grz_f[1]) + ((total_final_value * grz_f[0]) * grz_f[2])
@@ -584,18 +558,20 @@ changing_features = get_features(CONSTRUCTION_DIR)
 unchanging_features = get_features(UNCHANGING_DIR)
 changing_features = preprocess_base_features(
     changing_features, unchanging_features, CONSTRUCTION_BASE_VALUES)
-compensatory_features = get_features(COMPENSATORY_DIR)
-compensatory_features = preprocess_compensatory_features(compensatory_features)
+# compensatory_features = get_features(COMPENSATORY_DIR)
+# print("compensatory_features", compensatory_features)
+# compensatory_features = preprocess_compensatory_features(compensatory_features)
+# print("compensatory_features", compensatory_features)
 # compensatory_features = preprocess_base_features(
 #     compensatory_features, unchanging_features, COMPENSATORY_BASE_VALUES)
+# compensatory_features = add_compensatory_value(compensatory_features)
 # print("compensatory_features", compensatory_features)
 protected_area_features = get_features(PROTECTED_DIR)
 protected_area_features = preprocess_protected_area_features(
     protected_area_features)
 output_shapes = []
-for changing_feature in changing_features:
-    output_shapes.append(separate_features(
-        changing_feature, buffers, protected_area_features, compensatory_features))
+output_shapes = separate_features(
+    changing_features, buffers, protected_area_features)
 
 # for shapes in output_shapes:
 #     for shape in shapes:
@@ -606,16 +582,15 @@ total_final_value = calculate_total_final_value(output_shapes, GRZ)
 print(f"Total final value: {total_final_value}")
 
 # create shapes
-for shapes in output_shapes:
-    for lagefaktor_shape in shapes:
-        # Check if any column name is longer than 10 characters
-        for column in lagefaktor_shape['shape'].columns:
-            if len(column) > 10:
-                print(
-                    f"Warning: Column name '{column}' is longer than 10 characters.")
+for lagefaktor_shape in output_shapes:
+    # Check if any column name is longer than 10 characters
+    for column in lagefaktor_shape['shape'].columns:
+        if len(column) > 10:
+            print(
+                f"Warning: Column name '{column}' is longer than 10 characters.")
 
-        if lagefaktor_shape is shapes[-1]:
-            lagefaktor_shape['file_base_name'] = lagefaktor_shape['file_base_name'] + '_over'
+    if lagefaktor_shape is output_shapes[-1]:
+        lagefaktor_shape['file_base_name'] = lagefaktor_shape['file_base_name'] + '_over'
 
-        create_lagefaktor_shapes(
-            lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
+    create_lagefaktor_shapes(
+        lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
