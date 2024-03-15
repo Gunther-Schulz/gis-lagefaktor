@@ -166,13 +166,11 @@ def get_features(dir):
         # Return an empty GeoDataFrame with the same columns
         return gpd.GeoDataFrame(columns=['geometry', 'file'], crs=CRS)
 
-    # print('features', features)
     # Concatenate all GeoDataFrames in the list into a single GeoDataFrame
     features_gdf = pd.concat(features, ignore_index=True)
 
     # Ensure the resulting GeoDataFrame has the correct CRS
     features_gdf.set_crs(CRS, inplace=True)
-    # print('features_gdf', features_gdf)
 
     return features_gdf
 
@@ -317,8 +315,9 @@ def print_results(file_base_name, buffer_distances, changing_feature_B1_area, ch
         f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {round(changing_feature_outside_B2_area)}")
 
 
-def filter_features(features, scope):
+def filter_features(scope, features):
     if not scope.empty:
+        print('Filtering features')
         # Check if the geometry of each row in changing_feature is within or overlaps with the scope
         features = features[features.geometry.within(
             scope.geometry.unary_union) | features.geometry.overlaps(scope.geometry.unary_union)]
@@ -334,34 +333,7 @@ def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance)
             f'{OUTPUT_DIR}/{file_base_name}_buffer_{buffer_distance}_intersection.shp')
 
 
-# def add_protected_area_value(feature, protected_area_features):
-#     # Initialize 'protected' column with 1
-#     feature['protected'] = 1
-
-#     # Iterate over each protected_area_feature
-#     for protected_area_feature in protected_area_features:
-#         # Get the file_name from the first row of each protected_area_feature
-#         file_name = protected_area_feature['file'].iloc[0]
-#         does_intersect = False
-#         for _, row in feature.iterrows():
-#             for _, protected_row in protected_area_feature.iterrows():
-#                 if row['geometry'].intersects(protected_row['geometry']):
-#                     does_intersect = True
-#                     break
-#             if does_intersect:
-#                 break
-#         # If the feature intersects with the protected_area_feature
-#         if does_intersect:
-#             # Update 'protected' with the corresponding value from PROTECTED_AREA_VALUES
-#             feature['protected'] = CONSTRUCTION_PROTECTED_VALUES[file_name]
-#             return feature
-#     return feature
-
-
 def resolve_overlaps(feature):
-    # # Sort features by 'lagefaktor' so that we iterate from highest to lowest
-    # feature = feature.sort_values(by=sort_by, ascending=False)
-
     resolved_geometries = gpd.GeoDataFrame(columns=feature.columns)
     for index, row in feature.iterrows():
         current_geom = row.geometry
@@ -385,7 +357,7 @@ def resolve_overlaps(feature):
 
             resolved_geometries = pd.concat(
                 [resolved_geometries, temp_gdf], ignore_index=True)
-    # Explode any MultiPolygon geometries into individual Polygon geometries
+
     # Explode any MultiPolygon geometries into individual Polygon geometries
     resolved_geometries = resolved_geometries.explode(index_parts=True)
     resolved_geometries.crs = CRS
@@ -425,6 +397,7 @@ def add_lagefaktor_values(feature, lagefaktor_value):
 
     # Dissolve polygons based on 'lagefaktor', taking the first (or max, depending on your requirement) value for each group
     # Note: Adjust the aggregation function as needed. Here, we're using 'first' for simplicity.
+    # We can use 'first' here , beacause there is only one value for each 'lagefaktor' group
     flattened_feature = feature.dissolve(by='lagefaktor', aggfunc='first')
     flattened_feature.reset_index(inplace=True)
 
@@ -444,31 +417,8 @@ def add_lagefaktor_values(feature, lagefaktor_value):
     return resolved_gdf
 
 
-# def calculate_finals(feature):
-#     # If features is not a pandas DataFrame, make it a DataFrame
-#     if not isinstance(feature, gpd.GeoDataFrame):
-#         feature = gpd.GeoDataFrame([feature])
-
-#     # Iterate over the rows of the DataFrame
-#     for i, row in feature.iterrows():
-#         area = row['geometry'].area
-#         row['final'] = row['base_value'] * row['compensat'] * \
-#             row['lagefaktor'] * row['protected']
-#         row['raw_final'] = round(row['final'], 2)
-#         row['final'] = round(row['final'] * area, 2)
-#         # feature.loc[i, 'final'] = row['final']
-#         feature.loc[i, 'raw_final'] = row['raw_final']
-
-#     return feature
-
-
 def add_compensatory_value(compensatory_features, protected_area_features):
-    # Resolve overlaps in compensatory_features and protected_area_features
-    # compensatory_features = resolve_overlaps(compensatory_features)
-    # rename 'file' to 'protected_f'
-    # protected_area_features = protected_area_features.rename(
-    #     columns={'file': 'protect_f'})
-    # sort protected_area_features by 'protected' so that we iterate from highest to lowest
+
     protected_area_features = protected_area_features.sort_values(
         by='protected', ascending=False)
     protected_area_features = resolve_overlaps(protected_area_features)
@@ -489,8 +439,6 @@ def add_compensatory_value(compensatory_features, protected_area_features):
 
 
 def process_geodataframes(base_feature, cover_features, sort_by):
-    # sort cover_features by 'protected' so that we iterate from highest to lowest
-    # assuming we only have protected areas as cover_features
     cover_features = cover_features.sort_values(
         by=sort_by, ascending=False)
     # rolve_overlaps for cover_features
@@ -547,7 +495,7 @@ def process_geodataframes(base_feature, cover_features, sort_by):
     return base_feature
 
 
-def separate_features(construction_feature, buffers, protected_area_features):
+def separate_features(scope, construction_feature, buffers, protected_area_features):
     global context
     # TODO: we can hondly handle a singl construction feature at this time (ususally Baufled)
     file_name = construction_feature['file'].iloc[0]
@@ -559,8 +507,8 @@ def separate_features(construction_feature, buffers, protected_area_features):
         changing_feature_B1_intersection, protected_area_features, 'protected')
     changing_feature_B1_intersection = add_lagefaktor_values(
         changing_feature_B1_intersection, CONSTRUCTION_LAGEFAKTOR_VALUES['<100'])
-    changing_feature_B1_intersection = filter_features(
-        changing_feature_B1_intersection, protected_area_features)
+    changing_feature_B1_intersection = filter_features(scope,
+                                                       changing_feature_B1_intersection)
 
     changing_feature_B2_intersection = calculate_intersection(
         construction_feature, buffers[1], 'intersects with Buffer >100 <625', file_name)
@@ -573,7 +521,7 @@ def separate_features(construction_feature, buffers, protected_area_features):
     changing_feature_B2_not_B1 = add_lagefaktor_values(
         changing_feature_B2_not_B1, CONSTRUCTION_LAGEFAKTOR_VALUES['>100<625'])
     changing_feature_B2_not_B1 = filter_features(
-        changing_feature_B2_not_B1, protected_area_features)
+        scope, changing_feature_B2_not_B1)
 
     # Calculate area outside B2
     changing_feature_outside_B2 = calculate_difference(
@@ -583,7 +531,7 @@ def separate_features(construction_feature, buffers, protected_area_features):
     changing_feature_outside_B2 = add_lagefaktor_values(
         changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES['>625'])
     changing_feature_outside_B2 = filter_features(
-        changing_feature_outside_B2, protected_area_features)
+        scope, changing_feature_outside_B2)
 
     # Calculate area
     changing_feature_outside_B2_area = calculate_area(
@@ -633,10 +581,8 @@ def process_geometries(changing_feature_outside_B2):
     changing_feature_outside_B2 = changing_feature_outside_B2[
         changing_feature_outside_B2.geometry.type == 'Polygon']
 
-    # # Remove polygons with area of < 0.1
-    # changing_feature_outside_B2 = changing_feature_outside_B2[
-    #     changing_feature_outside_B2.geometry.area >= 1]
-    changing_feature_outside_B2 = remove_slivers(changing_feature_outside_B2)
+    changing_feature_outside_B2 = remove_slivers(
+        changing_feature_outside_B2, 0.001)
 
     # Merge overlapping polygons
     # Add a column with the same value for all rows
@@ -668,18 +614,18 @@ protected_area_features = preprocess_protected_area_features(
 construction_features = preprocess_base_features(
     construction_features, changing_features, unchanging_features, CHANGING_CONSTRUCTION_BASE_VALUES)
 compensatory_features = get_features(COMPENSATORY_DIR)
-print("1 compensatory_features\n", compensatory_features)
+# print("1 compensatory_features\n", compensatory_features)
 compensatory_features = preprocess_compensatory_features(compensatory_features)
-print("2 compensatory_features\n", compensatory_features)
+# print("2 compensatory_features\n", compensatory_features)
 compensatory_features = preprocess_base_features(
     compensatory_features, changing_features, unchanging_features, CHANGING_COMPENSATORY_BASE_VALUES)
-print("3 compensatory_features\n", compensatory_features)
+# print("3 compensatory_features\n", compensatory_features)
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
-print("4 compensatory_features\n", compensatory_features)
+# print("4 compensatory_features\n", compensatory_features)
 output_shapes = []
 output_shapes = separate_features(
-    construction_features, buffers, protected_area_features)
+    scope, construction_features, buffers, protected_area_features)
 
 # for shapes in output_shapes:
 #     print(shape['shape'])
@@ -707,7 +653,7 @@ for lagefaktor_shape in output_shapes:
 for file in compensatory_features['file'].unique():
     # Get the features for the current file
     current_features = compensatory_features[compensatory_features['file'] == file]
-    current_features = filter_features(current_features, scope)
+    current_features = filter_features(scope, current_features)
 
     # Calculate
 
