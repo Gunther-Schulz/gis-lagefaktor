@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import numpy as np
 import shutil
 import os
 import argparse
@@ -318,20 +319,22 @@ def filter_features(scope, features):
         # Check if the geometry of each row in changing_feature is within or overlaps with the scope
         features = features[features.geometry.within(
             scope.geometry.unary_union) | features.geometry.overlaps(scope.geometry.unary_union)]
+        # filter all with area over 0
+        features = features[features.geometry.area > 0]
     return features
 
 
 def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
-    if changing_features.area.sum() > 0:
-        # Set the file name
-        file_name = f'Construction_{file_base_name}_buffer_{buffer_distance}_intersection'
 
-        # Set the directory name to be the same as the file name
-        new_dir = f'{OUTPUT_DIR}/{file_name}'
-        os.makedirs(new_dir, exist_ok=True)
+    # Set the file name
+    file_name = f'Construction_{file_base_name}_buffer_{buffer_distance}_intersection'
 
-        # Save the shape in the new directory
-        changing_features.to_file(f'{new_dir}/{file_name}.shp')
+    # Set the directory name to be the same as the file name
+    new_dir = f'{OUTPUT_DIR}/{file_name}'
+    os.makedirs(new_dir, exist_ok=True)
+
+    # Save the shape in the new directory
+    changing_features.to_file(f'{new_dir}/{file_name}.shp')
 
 
 def resolve_overlaps(feature):
@@ -444,6 +447,10 @@ def process_geodataframes(base_feature, cover_features, sort_by):
         by=sort_by, ascending=False)
     # rolve_overlaps for cover_features
     cover_features = resolve_overlaps(cover_features)
+
+    # rename 'file' column in cover_features to f'{sort_by}_f'
+    cover_features = cover_features.rename(
+        columns={'file': f'{sort_by[:8]}_f'})
 
     # Create separate polygons wherever changing_feature overlaps with protected_area_features
     overlapping_areas = gpd.overlay(
@@ -653,15 +660,28 @@ for lagefaktor_shape in output_shapes:
         lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
 
 # create shapes for compensatory features, one shape file for each from in attribute 'file'
+total = 0
 for file in compensatory_features['file'].unique():
     # Get the features for the current file
     current_features = compensatory_features[compensatory_features['file'] == file]
     current_features = filter_features(scope, current_features)
 
-    # Calculate
+    # Calculate 'compensat' * 'base_value' * area for each feature
+    current_features['final_v'] = (current_features['compensat'] -
+                                   current_features['base_value']) * current_features.geometry.area
 
-    # Filter out the rows with area over 0
-    current_features = current_features[current_features.geometry.area > 0]
+    def calculate_value(row):
+        if row.geometry.area >= 2000:
+            print('Calculating value for area >= 2000')
+            return row['final_v'] * COMPENSATORY_PROTECTED_VALUES[row['protecte_f']]
+        else:
+            return row['final_v']
+
+    current_features['final_v'] = current_features.apply(
+        calculate_value, axis=1)
+
+    # Summarize and add to total
+    total += current_features['final_v'].sum()
 
     # Save the GeoDataFrame to a file in the output directory
     current_features.to_file(os.path.join(
