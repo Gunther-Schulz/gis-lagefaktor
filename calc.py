@@ -1,3 +1,4 @@
+import shutil
 import os
 import argparse
 import geopandas as gpd
@@ -29,6 +30,7 @@ args = parser.parse_args()
 
 # Define directories
 dir_path = os.path.join(DATA_DIR, args.DirName)
+SCOPE_DIR = os.path.join(dir_path, 'scope')
 CHANGING_DIR = os.path.join(dir_path, 'changing')
 CONSTRUCTION_DIR = os.path.join(dir_path, 'construction')
 UNCHANGING_DIR = os.path.join(dir_path, 'unchanging')
@@ -64,10 +66,11 @@ for dir in dirs:
 # List of directories to clean
 dirs = [OUTPUT_DIR, DEBUG_DIR]
 
-# Remove all files in each directory
+
+# Remove all files and subdirectories in each directory
 for dir in dirs:
-    for file in glob.glob(f'{dir}/*'):
-        os.remove(file)
+    shutil.rmtree(dir, ignore_errors=True)
+    os.makedirs(dir, exist_ok=True)
 
 
 # Global variable to keep track of the context
@@ -245,6 +248,10 @@ def preprocess_base_features(base_features, changing_features, unchanged_feature
     changing_features = changing_features.rename(
         columns={'file': 'changing_f'})
 
+    # punch holes
+    changing_features = gpd.overlay(
+        changing_features, unchanged_features, how='difference')
+
     # Overlay construction_features with changing_features
     intersected_features = gpd.overlay(
         base_features, changing_features, how='intersection')
@@ -310,11 +317,20 @@ def print_results(file_base_name, buffer_distances, changing_feature_B1_area, ch
         f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {round(changing_feature_outside_B2_area)}")
 
 
-def create_lagefaktor_shapes(changing_feature, file_base_name, buffer_distance):
-    if changing_feature.area.sum() > 0:
+def filter_features(features, scope):
+    if not scope.empty:
+        # Check if the geometry of each row in changing_feature is within or overlaps with the scope
+        features = features[features.geometry.within(
+            scope.geometry.unary_union) | features.geometry.overlaps(scope.geometry.unary_union)]
+    return features
+
+
+def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
+
+    if changing_features.area.sum() > 0:
         # changing_feature['area'] = changing_feature.geometry.area.round().astype(
         #     int)
-        changing_feature.to_file(
+        changing_features.to_file(
             f'{OUTPUT_DIR}/{file_base_name}_buffer_{buffer_distance}_intersection.shp')
 
 
@@ -397,6 +413,8 @@ def remove_slivers(gdf, buffer_distance=0.0001):
 
 
 def add_lagefaktor_values(feature, lagefaktor_value):
+    # save feature to debug file
+    feature.to_file(f'{DEBUG_DIR}/feature{lagefaktor_value}.shp')
     # Add a new column 'lagefaktor'
     feature['lagefaktor'] = feature.apply(lambda row: row['protected'] if pd.notnull(
         row['protected']) else lagefaktor_value, axis=1)
@@ -420,25 +438,28 @@ def add_lagefaktor_values(feature, lagefaktor_value):
     # Remove slivers
     resolved_gdf = remove_slivers(resolved_gdf, 0.001)
 
+    # save resolved_gdf to debug file
+    resolved_gdf.to_file(f'{DEBUG_DIR}/resolved_gdf{lagefaktor_value}.shp')
+
     return resolved_gdf
 
 
-def calculate_finals(feature):
-    # If features is not a pandas DataFrame, make it a DataFrame
-    if not isinstance(feature, gpd.GeoDataFrame):
-        feature = gpd.GeoDataFrame([feature])
+# def calculate_finals(feature):
+#     # If features is not a pandas DataFrame, make it a DataFrame
+#     if not isinstance(feature, gpd.GeoDataFrame):
+#         feature = gpd.GeoDataFrame([feature])
 
-    # Iterate over the rows of the DataFrame
-    for i, row in feature.iterrows():
-        area = row['geometry'].area
-        row['final'] = row['base_value'] * row['compensat'] * \
-            row['lagefaktor'] * row['protected']
-        row['raw_final'] = round(row['final'], 2)
-        row['final'] = round(row['final'] * area, 2)
-        # feature.loc[i, 'final'] = row['final']
-        feature.loc[i, 'raw_final'] = row['raw_final']
+#     # Iterate over the rows of the DataFrame
+#     for i, row in feature.iterrows():
+#         area = row['geometry'].area
+#         row['final'] = row['base_value'] * row['compensat'] * \
+#             row['lagefaktor'] * row['protected']
+#         row['raw_final'] = round(row['final'], 2)
+#         row['final'] = round(row['final'] * area, 2)
+#         # feature.loc[i, 'final'] = row['final']
+#         feature.loc[i, 'raw_final'] = row['raw_final']
 
-    return feature
+#     return feature
 
 
 def add_compensatory_value(compensatory_features, protected_area_features):
@@ -458,7 +479,7 @@ def add_compensatory_value(compensatory_features, protected_area_features):
 
     # Use process_geodataframes function
     flattened_features = process_geodataframes(
-        compensatory_features, protected_area_features)
+        compensatory_features, protected_area_features, 'protected')
 
     # write debug file
     flattened_features.to_file(
@@ -467,11 +488,11 @@ def add_compensatory_value(compensatory_features, protected_area_features):
     return flattened_features
 
 
-def process_geodataframes(base_feature, cover_features):
+def process_geodataframes(base_feature, cover_features, sort_by):
     # sort cover_features by 'protected' so that we iterate from highest to lowest
     # assuming we only have protected areas as cover_features
     cover_features = cover_features.sort_values(
-        by='protected', ascending=False)
+        by=sort_by, ascending=False)
     # rolve_overlaps for cover_features
     cover_features = resolve_overlaps(cover_features)
 
@@ -535,9 +556,11 @@ def separate_features(construction_feature, buffers, protected_area_features):
     changing_feature_B1_intersection = calculate_intersection(
         construction_feature, buffers[0], 'intersects with Buffer <100', file_name)
     changing_feature_B1_intersection = process_geodataframes(
-        changing_feature_B1_intersection, protected_area_features)
+        changing_feature_B1_intersection, protected_area_features, 'protected')
     changing_feature_B1_intersection = add_lagefaktor_values(
         changing_feature_B1_intersection, CONSTRUCTION_LAGEFAKTOR_VALUES['<100'])
+    changing_feature_B1_intersection = filter_features(
+        changing_feature_B1_intersection, protected_area_features)
 
     changing_feature_B2_intersection = calculate_intersection(
         construction_feature, buffers[1], 'intersects with Buffer >100 <625', file_name)
@@ -546,17 +569,21 @@ def separate_features(construction_feature, buffers, protected_area_features):
         changing_feature_B2_intersection, changing_feature_B1_intersection,
         'intersects with Buffer >100 <625 but not Buffer <100', file_name)
     changing_feature_B2_not_B1 = process_geodataframes(
-        changing_feature_B2_not_B1, protected_area_features)
+        changing_feature_B2_not_B1, protected_area_features, 'protected')
     changing_feature_B2_not_B1 = add_lagefaktor_values(
         changing_feature_B2_not_B1, CONSTRUCTION_LAGEFAKTOR_VALUES['>100<625'])
+    changing_feature_B2_not_B1 = filter_features(
+        changing_feature_B2_not_B1, protected_area_features)
 
     # Calculate area outside B2
     changing_feature_outside_B2 = calculate_difference(
         construction_feature, buffers[1], 'outside Buffer >625', file_name)
     changing_feature_outside_B2 = process_geodataframes(
-        changing_feature_outside_B2, protected_area_features)
+        changing_feature_outside_B2, protected_area_features, 'protected')
     changing_feature_outside_B2 = add_lagefaktor_values(
         changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES['>625'])
+    changing_feature_outside_B2 = filter_features(
+        changing_feature_outside_B2, protected_area_features)
 
     # Calculate area
     changing_feature_outside_B2_area = calculate_area(
@@ -631,6 +658,7 @@ def process_geometries(changing_feature_outside_B2):
 
 
 buffers = get_buffers(BUFFER_DISTANCES)
+scope = get_features(SCOPE_DIR)
 construction_features = get_features(CONSTRUCTION_DIR)
 changing_features = get_features(CHANGING_DIR)
 unchanging_features = get_features(UNCHANGING_DIR)
@@ -657,6 +685,7 @@ output_shapes = separate_features(
 #     print(shape['shape'])
 # print(output_shapes[0][0]['shape'])
 
+
 total_final_value = calculate_total_final_value(output_shapes, GRZ)
 print(f"Total final value: {total_final_value}")
 
@@ -673,3 +702,18 @@ for lagefaktor_shape in output_shapes:
 
     create_lagefaktor_shapes(
         lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
+
+# create shapes for compensatory features, one shape file for each from in attribute 'file'
+for file in compensatory_features['file'].unique():
+    # Get the features for the current file
+    current_features = compensatory_features[compensatory_features['file'] == file]
+    current_features = filter_features(current_features, scope)
+
+    # Calculate
+
+    # Filter out the rows with area over 0
+    current_features = current_features[current_features.geometry.area > 0]
+
+    # Save the GeoDataFrame to a file in the output directory
+    current_features.to_file(os.path.join(
+        OUTPUT_DIR, 'Compensatory_' + file), driver='ESRI Shapefile')
