@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import shutil
 import os
 import argparse
@@ -262,11 +263,9 @@ def preprocess_base_features(base_features, changing_features, unchanged_feature
     # Flatten the result into a single geometry and keep the first unique value for each group of data
     base_features = intersected_features.dissolve(
         by='file', aggfunc='first')
-    # print("1 base_features\n", base_features)
 
     # explode
     base_features = base_features.explode(index_parts=False)
-    # print("2 base_features\n", base_features)
 
     # Reset the index of base_features and changing_features
     base_features.reset_index(drop=False, inplace=True)
@@ -275,8 +274,6 @@ def preprocess_base_features(base_features, changing_features, unchanged_feature
     # Merge the base_features with the changing_features
     base_features['base_value'] = base_features['changing_f'].map(
         values)
-
-    # print("3 base_features\n", base_features)
 
     return base_features
 
@@ -325,12 +322,16 @@ def filter_features(scope, features):
 
 
 def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
-
     if changing_features.area.sum() > 0:
-        # changing_feature['area'] = changing_feature.geometry.area.round().astype(
-        #     int)
-        changing_features.to_file(
-            f'{OUTPUT_DIR}/{file_base_name}_buffer_{buffer_distance}_intersection.shp')
+        # Set the file name
+        file_name = f'Construction_{file_base_name}_buffer_{buffer_distance}_intersection'
+
+        # Set the directory name to be the same as the file name
+        new_dir = f'{OUTPUT_DIR}/{file_name}'
+        os.makedirs(new_dir, exist_ok=True)
+
+        # Save the shape in the new directory
+        changing_features.to_file(f'{new_dir}/{file_name}.shp')
 
 
 def resolve_overlaps(feature):
@@ -457,9 +458,11 @@ def process_geodataframes(base_feature, cover_features, sort_by):
     non_overlapping_areas.crs = CRS
 
     # Combine overlapping_areas and non_overlapping_areas and keep separate polygons
-    base_feature = gpd.overlay(
-        non_overlapping_areas, overlapping_areas, how='union')
-
+    if not non_overlapping_areas.empty and not overlapping_areas.empty:
+        base_feature = gpd.overlay(
+            non_overlapping_areas, overlapping_areas, how='union')
+    else:
+        base_feature = overlapping_areas
     # Get the non-geometry columns
     non_geometry_columns = base_feature.columns.difference(['geometry'])
 
@@ -614,15 +617,15 @@ protected_area_features = preprocess_protected_area_features(
 construction_features = preprocess_base_features(
     construction_features, changing_features, unchanging_features, CHANGING_CONSTRUCTION_BASE_VALUES)
 compensatory_features = get_features(COMPENSATORY_DIR)
-# print("1 compensatory_features\n", compensatory_features)
+
 compensatory_features = preprocess_compensatory_features(compensatory_features)
-# print("2 compensatory_features\n", compensatory_features)
+
 compensatory_features = preprocess_base_features(
     compensatory_features, changing_features, unchanging_features, CHANGING_COMPENSATORY_BASE_VALUES)
-# print("3 compensatory_features\n", compensatory_features)
+
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
-# print("4 compensatory_features\n", compensatory_features)
+
 output_shapes = []
 output_shapes = separate_features(
     scope, construction_features, buffers, protected_area_features)
