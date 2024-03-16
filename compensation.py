@@ -82,7 +82,12 @@ for dir in dirs:
     shutil.rmtree(dir, ignore_errors=True)
     os.makedirs(dir, exist_ok=True)
 
-BUFFER_DISTANCES = (100, 625)
+BUFFER_GEN_DISTANCES = (100, 625)
+BUFFER_DISTANCES = {
+    '<100': '<100',
+    '>100<625': '>100<625',
+    '>625': '>625'
+}
 CHANGING_CONSTRUCTION_BASE_VALUES = {
     'Acker': 1, 'Grünland': 1, 'Weg': 1, 'weg': 1}
 
@@ -301,21 +306,19 @@ def preprocess_features(features, feature_type, buffer_distance=10):
         # Set 'protected' value based on 's_name'
         processed_features['protected'] = processed_features['s_name'].apply(
             lambda x: CONSTRUCTION_PROTECTED_VALUES.get(x, None))
-    # elif feature_type == 'construction':
-    #     # Additional processing for base features
-    #     processed_features['protected'] = processed_features['s_name'].apply(
-    #         lambda x: CHANGING_CONSTRUCTION_BASE_VALUES.get(x, None))
-    #     processed_features = process_base_features(processed_features)
-
     return processed_features
 
 
-def process_base_features(base_features, unchanged_features, changing_features, values):
+def process_and_overlay_features(base_features, unchanged_features, changing_features, values):
     """
-    Additional processing specific to base features.
+    Processing and overlaying features based on 'base_features', 'unchanged_features', 'changing_features', and 'values'.
+    The purpose is to assign values to the base features based on the changing features.
 
     Parameters:
-    - base_features: GeoDataFrame of base features.
+    - base_features: GeoDataFrame of base features (e.g., construction or compensatory features).
+    - unchanged_features: GeoDataFrame of unchanged features.
+    - changing_features: GeoDataFrame of changing features.
+    - values: Dictionary of values to be assigned to the base features.
 
     Returns:
     - Processed GeoDataFrame.
@@ -353,67 +356,85 @@ def process_base_features(base_features, unchanged_features, changing_features, 
     return base_features
 
 
-def calculate_intersection(changing_feature, buffer, context, file_base_name):
-    context = context
-    intersection = gpd.overlay(changing_feature, buffer, how='intersection')
+# def calculate_overlay(changing_feature, buffer, context, file_base_name):
+#     context = context
+#     intersection = gpd.overlay(changing_feature, buffer, how='intersection')
 
-    return intersection
+#     return intersection
 
 
-def calculate_difference(feature1, feature2, context, file_base_name):
+# def calculate_difference(feature1, feature2, context, file_base_name):
 
-    context = context
-    difference = gpd.overlay(
-        feature1, feature2, how='difference')
+#     context = context
+#     difference = gpd.overlay(
+#         feature1, feature2, how='difference')
 
-    return difference
+#     return difference
+
+def calculate_overlay(feature1, feature2, operation, context, file_base_name):
+    """
+    Calculate the geometric overlay between two features.
+
+    Parameters:
+    - feature1: The first GeoDataFrame.
+    - feature2: The second GeoDataFrame.
+    - operation: A string specifying the overlay operation ('intersection' or 'difference').
+    - context: The context in which this function is called. (Unused in this refactored version)
+    - file_base_name: The base name for any output files. (Unused in this refactored version)
+
+    Returns:
+    - A GeoDataFrame resulting from the specified overlay operation between feature1 and feature2.
+    """
+    return gpd.overlay(feature1, feature2, how=operation)
 
 
 def calculate_area(changing_feature):
+    """
+    Calculate the total area of all geometries in a GeoDataFrame.
+
+    Parameters:
+    - changing_feature: A GeoDataFrame whose total area is to be calculated.
+
+    Returns:
+    - The sum of the areas of all geometries in the GeoDataFrame.
+    """
     return changing_feature.area.sum()
 
 
 def filter_features(scope, features):
+    """
+    Filter features based on their spatial relationship to a given scope and their area.
+
+    Parameters:
+    - scope: A GeoDataFrame representing the area of interest.
+    - features: A GeoDataFrame containing features to be filtered.
+
+    Returns:
+    - A GeoDataFrame containing features that are within or overlap the scope and have an area greater than 0.
+    """
     if not scope.empty:
         print('Filtering features')
-        # Check if the geometry of each row in changing_feature is within or overlaps with the scope
-        features = features[features.geometry.within(
-            scope.geometry.unary_union) | features.geometry.overlaps(scope.geometry.unary_union)]
-        # filter all with area over 0
-        features = features[features.geometry.area > 0]
+        # Filter features based on spatial relationship and area
+        features = features[
+            (features.geometry.within(scope.geometry.unary_union) |
+             features.geometry.overlaps(scope.geometry.unary_union)) &
+            (features.geometry.area > 0)
+        ]
     return features
 
 # ----> Value Assignment and Aggregation <----
 
 
 def add_lagefaktor_values(feature, lagefaktor_value):
-    # Add a new column 'lagefaktor'
-    # when row['protected'] is not null, use it as 'lagefaktor', otherwise use lagefaktor_value
+    """
+    Adds or updates the 'lagefaktor' column in the feature GeoDataFrame.
+    """
     if 'protected' in feature.columns:
-        feature['lagefaktor'] = feature.apply(lambda row: row['protected'] if pd.notnull(
-            row['protected']) else lagefaktor_value, axis=1)
+        feature['lagefaktor'] = feature['protected'].fillna(lagefaktor_value)
+        if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
+            feature['lagefaktor'] -= 0.25
 
-        # If lagefaktor_value is 0.75, reduce the final 'lagefaktor' value by 0.25
-        if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES['<100']:
-            feature['lagefaktor'] = feature['lagefaktor'] - 0.25
-
-        # Dissolve polygons based on 'lagefaktor', taking the first (or max, depending on your requirement) value for each group
-        # Note: Adjust the aggregation function as needed. Here, we're using 'first' for simplicity.
-        # We can use 'first' here , beacause there is only one value for each 'lagefaktor' group
-        flattened_feature = feature.dissolve(by='lagefaktor', aggfunc='first')
-        flattened_feature.reset_index(inplace=True)
-
-        # Sort the GeoDataFrame by 'lagefaktor' in descending order, if needed
-        flattened_feature.sort_values(
-            by='lagefaktor', ascending=False, inplace=True)
-
-        # Assuming 'gdf' is your GeoDataFrame with a 'lagefaktor' column and a 'geometry' column
-        resolved_gdf = resolve_overlaps(flattened_feature)
-
-        # Remove slivers
-        resolved_gdf = remove_slivers(resolved_gdf, 0.001)
-
-        feature = resolved_gdf
+        feature = dissolve_sort_and_resolve(feature, 'lagefaktor')
     else:
         feature['lagefaktor'] = lagefaktor_value
 
@@ -421,86 +442,77 @@ def add_lagefaktor_values(feature, lagefaktor_value):
 
 
 def add_compensatory_value(compensatory_features, protected_area_features):
-
-    # Add a new column 'compensat'
-    compensatory_features['compensat'] = compensatory_features.apply(
-        lambda row: COMPENSATORY_MEASURE_VALUES[row['s_name']], axis=1)
+    """
+    Adds a 'compensat' column to compensatory_features based on 's_name' values.
+    """
+    compensatory_features['compensat'] = compensatory_features['s_name'].map(
+        COMPENSATORY_MEASURE_VALUES)
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
             by='protected', ascending=False)
         protected_area_features = resolve_overlaps(protected_area_features)
-
-        # Use process_geodataframes function
-        compensatory_features = process_geodataframes(
+        compensatory_features = process_geodataframe_overlaps(
             compensatory_features, protected_area_features, 'protected')
 
     return compensatory_features
 
 
-def process_geodataframes(base_feature, cover_features, sort_by=None):
+def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
+    """
+    Processes base_feature and cover_features GeoDataFrames to handle overlaps and differences.
+    """
     if not cover_features.empty:
         print('Processing cover features')
         cover_features = cover_features.sort_values(
             by=sort_by, ascending=False)
-        # rolve_overlaps for cover_features
         cover_features = resolve_overlaps(cover_features)
-
-        # rename 's_name' column in cover_features to f'{sort_by}_f'
         cover_features = cover_features.rename(
             columns={'s_name': f'{sort_by[:8]}_f'})
 
-        # Create separate polygons wherever changing_feature overlaps with protected_area_features
         overlapping_areas = gpd.overlay(
             base_feature, cover_features, how='intersection')
-
-        overlapping_areas.crs = CRS
-
-        # Get the parts of changing_feature that don't overlap with protected_area_features
         non_overlapping_areas = gpd.overlay(
             base_feature, cover_features, how='difference')
 
-        non_overlapping_areas.crs = CRS
+        base_feature = gpd.overlay(non_overlapping_areas, overlapping_areas,
+                                   how='union') if not non_overlapping_areas.empty and not overlapping_areas.empty else overlapping_areas
+        base_feature = consolidate_columns(base_feature)
 
-        # Combine overlapping_areas and non_overlapping_areas and keep separate polygons
-        if not non_overlapping_areas.empty and not overlapping_areas.empty:
-            base_feature = gpd.overlay(
-                non_overlapping_areas, overlapping_areas, how='union')
-        else:
-            base_feature = overlapping_areas
-        # Get the non-geometry columns
-        non_geometry_columns = base_feature.columns.difference(['geometry'])
-
-        # Iterate over the non-geometry columns
-        for column in non_geometry_columns:
-            # Get the columns that start with the same initial substring
-            matching_columns = [
-                col for col in base_feature.columns if col.split('_')[0] == column.split('_')[0]]
-
-            # Skip if there are no matching columns
-            if len(matching_columns) < 2:
-                continue
-
-            # Sort the matching columns by length
-            matching_columns.sort(key=len)
-
-            # Consolidate the matching columns
-            for matching_column in matching_columns[1:]:
-                base_feature[matching_columns[0]] = base_feature[matching_columns[0]].combine_first(
-                    base_feature[matching_column])
-
-            # Drop the redundant columns
-            base_feature = base_feature.drop(columns=matching_columns[1:])
-
-            # Rename the consolidated column to the base name
-            base_name = matching_columns[0].rsplit('_', 1)[0]
-            base_feature = base_feature.rename(
-                columns={matching_columns[0]: base_name})
-
-        # remove slivers
         base_feature = remove_slivers(base_feature, 0.001)
 
     return base_feature
+
+
+def dissolve_sort_and_resolve(feature, by_column):
+    """
+    Dissolves, sorts, and resolves overlaps in a GeoDataFrame.
+    """
+    feature = feature.dissolve(by=by_column, aggfunc='first').reset_index()
+    feature.sort_values(by=by_column, ascending=False, inplace=True)
+    feature = resolve_overlaps(feature)
+    feature = remove_slivers(feature, 0.001)
+    return feature
+
+
+def consolidate_columns(feature):
+    """
+    Consolidates columns with matching initial substrings in a GeoDataFrame.
+    """
+    non_geometry_columns = feature.columns.difference(['geometry'])
+    for column in non_geometry_columns:
+        matching_columns = [col for col in feature.columns if col.split('_')[
+            0] == column.split('_')[0]]
+        if len(matching_columns) < 2:
+            continue
+        matching_columns.sort(key=len)
+        for matching_column in matching_columns[1:]:
+            feature[matching_columns[0]] = feature[matching_columns[0]
+                                                   ].combine_first(feature[matching_column])
+        feature = feature.drop(columns=matching_columns[1:])
+        base_name = matching_columns[0].rsplit('_', 1)[0]
+        feature = feature.rename(columns={matching_columns[0]: base_name})
+    return feature
 
 # ----> Feature Separation and Finalization <----
 
@@ -511,9 +523,9 @@ def separate_features(scope, construction_feature, buffers, protected_area_featu
     file_name = construction_feature['s_name'].iloc[0]
 
     # Calculate intersections
-    changing_feature_B1_intersection = calculate_intersection(
-        construction_feature, buffers[0], 'intersects with Buffer <100', file_name)
-    changing_feature_B1_intersection = process_geodataframes(
+    changing_feature_B1_intersection = calculate_overlay(
+        construction_feature, buffers[0], 'intersection', 'intersects with Buffer <100', file_name)
+    changing_feature_B1_intersection = process_geodataframe_overlaps(
         changing_feature_B1_intersection, protected_area_features, 'protected')
     changing_feature_B1_intersection = add_lagefaktor_values(
         changing_feature_B1_intersection, CONSTRUCTION_LAGEFAKTOR_VALUES['<100'])
@@ -522,14 +534,14 @@ def separate_features(scope, construction_feature, buffers, protected_area_featu
     # add attribute buffer_distance
     changing_feature_B1_intersection['buffer_dis'] = '<100'
 
-    changing_feature_B2_intersection = calculate_intersection(
-        construction_feature, buffers[1], 'intersects with Buffer >100 <625', file_name)
+    changing_feature_B2_intersection = calculate_overlay(
+        construction_feature, buffers[1], 'intersection', 'intersects with Buffer >100 <625', file_name)
 
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
-    changing_feature_B2_not_B1 = calculate_difference(
-        changing_feature_B2_intersection, changing_feature_B1_intersection,
+    changing_feature_B2_not_B1 = calculate_overlay(
+        changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference',
         'intersects with Buffer >100 <625 but not Buffer <100', file_name)
-    changing_feature_B2_not_B1 = process_geodataframes(
+    changing_feature_B2_not_B1 = process_geodataframe_overlaps(
         changing_feature_B2_not_B1, protected_area_features, 'protected')
     changing_feature_B2_not_B1 = add_lagefaktor_values(
         changing_feature_B2_not_B1, CONSTRUCTION_LAGEFAKTOR_VALUES['>100<625'])
@@ -538,9 +550,9 @@ def separate_features(scope, construction_feature, buffers, protected_area_featu
     changing_feature_B2_not_B1['buffer_dis'] = '>100<625'
 
     # Calculate area outside B2
-    changing_feature_outside_B2 = calculate_difference(
-        construction_feature, buffers[1], 'outside Buffer >625', file_name)
-    changing_feature_outside_B2 = process_geodataframes(
+    changing_feature_outside_B2 = calculate_overlay(
+        construction_feature, buffers[1], 'difference', 'outside Buffer >625', file_name)
+    changing_feature_outside_B2 = process_geodataframe_overlaps(
         changing_feature_outside_B2, protected_area_features, 'protected')
     changing_feature_outside_B2 = add_lagefaktor_values(
         changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES['>625'])
@@ -557,16 +569,16 @@ def separate_features(scope, construction_feature, buffers, protected_area_featu
         changing_feature_B1_intersection)
 
     # Print the results
-    print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
+    print_results(file_name, BUFFER_GEN_DISTANCES, changing_feature_B1_intersection_area,
                   changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
 
     return [
         {'shape': changing_feature_B1_intersection,
-            'file_base_name': file_name, 'buffer_distance': BUFFER_DISTANCES[0]},
+            'file_base_name': file_name, 'buffer_distance': BUFFER_GEN_DISTANCES[0]},
         {'shape': changing_feature_B2_not_B1, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_DISTANCES[1]},
+            'buffer_distance': BUFFER_GEN_DISTANCES[1]},
         {'shape': changing_feature_outside_B2, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_DISTANCES[1]}
+            'buffer_distance': BUFFER_GEN_DISTANCES[1]}
     ]
 
 
@@ -643,7 +655,7 @@ def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance)
 
 
 interference = get_features(INTERFERENCE_DIR)
-buffers = get_buffers(interference, BUFFER_DISTANCES)
+buffers = get_buffers(interference, BUFFER_GEN_DISTANCES)
 scope = get_features(SCOPE_DIR)
 compensatory_features = get_features(COMPENSATORY_DIR)
 construction_features = get_features(CONSTRUCTION_DIR)
@@ -656,13 +668,13 @@ scope = process_scope(scope, construction_features, compensatory_features)
 protected_area_features = preprocess_features(
     protected_area_features, 'protected_area')
 
-construction_features = process_base_features(
+construction_features = process_and_overlay_features(
     construction_features, unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
 
 compensatory_features = preprocess_features(
     compensatory_features, 'compensatory')
 # def process_base_features(base_features, unchanged_features, changing_features, values):
-compensatory_features = process_base_features(
+compensatory_features = process_and_overlay_features(
     compensatory_features, unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
