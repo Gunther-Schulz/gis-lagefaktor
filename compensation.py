@@ -183,39 +183,16 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
 
 warnings.showwarning = custom_warning
 
-
-def create_buffer(linestrings, distance):
-    # Create a buffer around each linestring
-    buffers = linestrings.buffer(distance)
-
-    # Convert the GeoSeries to a GeoDataFrame
-    buffers = buffers.to_frame()
-
-    # Rename the column to 'geometry'
-    buffers = buffers.rename(columns={buffers.columns[0]: 'geometry'})
-
-    # Set the geometry column
-    buffers = buffers.set_geometry('geometry')
-
-    # Dissolve all geometries into a single one
-    buffers = buffers.dissolve()
-
-    return buffers
+# ----> Utility Functions <----
 
 
-def get_buffers(features, distances):
-    # List to store buffers
-    buffers = []
+def get_value_with_warning(values, key):
+    if key not in values:
+        print(f"Warning: Value for {key} does not exist.")
+        return None  # or return a default value
+    return values[key]
 
-    # Loop over the buffer distances
-    for distance in distances:
-        # Create a buffer
-        buffer = create_buffer(features, distance)
-
-        # Add the buffer to the list of buffers
-        buffers.append(buffer)
-
-    return buffers
+# ----> Feature Retrieval and Initialization <----
 
 
 def get_features(dir):
@@ -253,6 +230,44 @@ def get_features(dir):
 
     return features_gdf
 
+# ----> Buffer Operations <----
+
+
+def create_buffer(linestrings, distance):
+    # Create a buffer around each linestring
+    buffers = linestrings.buffer(distance)
+
+    # Convert the GeoSeries to a GeoDataFrame
+    buffers = buffers.to_frame()
+
+    # Rename the column to 'geometry'
+    buffers = buffers.rename(columns={buffers.columns[0]: 'geometry'})
+
+    # Set the geometry column
+    buffers = buffers.set_geometry('geometry')
+
+    # Dissolve all geometries into a single one
+    buffers = buffers.dissolve()
+
+    return buffers
+
+
+def get_buffers(features, distances):
+    # List to store buffers
+    buffers = []
+
+    # Loop over the buffer distances
+    for distance in distances:
+        # Create a buffer
+        buffer = create_buffer(features, distance)
+
+        # Add the buffer to the list of buffers
+        buffers.append(buffer)
+
+    return buffers
+
+
+# ----> Feature Cleanup and Geometry Manipulation <----
 
 def cleanup_and_merge(feature, buffer_distance):
     # Save original string columns
@@ -283,6 +298,59 @@ def cleanup_and_merge(feature, buffer_distance):
     merged = pd.concat([geometry, original_string_columns], axis=1)
 
     return merged
+
+
+def resolve_overlaps(feature):
+    resolved_geometries = gpd.GeoDataFrame(columns=feature.columns)
+    for index, row in feature.iterrows():
+        current_geom = row.geometry
+        # Create a temporary GeoDataFrame for the current row to facilitate the use of concat
+        temp_gdf = gpd.GeoDataFrame([row], columns=feature.columns)
+
+        # Check for intersections with already resolved geometries (those with higher 'lagefaktor')
+        for _, r_geom in resolved_geometries.iterrows():
+            if current_geom.intersects(r_geom.geometry):
+                # If there's an intersection, difference the current geometry with the higher 'lagefaktor' geometry
+                current_geom = current_geom.difference(r_geom.geometry)
+
+        # If there's any geometry left after resolving intersections, add it to the resolved geometries
+        if not current_geom.is_empty:
+            # Update the geometry in the temporary GeoDataFrame
+            temp_gdf.geometry = [current_geom]
+
+            # Drop columns that are entirely NA or empty in both DataFrames before concatenating
+            resolved_geometries = resolved_geometries.dropna(how='all', axis=1)
+            temp_gdf = temp_gdf.dropna(how='all', axis=1)
+
+            resolved_geometries = pd.concat(
+                [resolved_geometries, temp_gdf], ignore_index=True)
+
+    # Explode any MultiPolygon geometries into individual Polygon geometries
+    resolved_geometries = resolved_geometries.explode(index_parts=True)
+    resolved_geometries.crs = CRS
+
+    return resolved_geometries
+
+
+def remove_slivers(gdf, buffer_distance=0.0001):
+    """
+    Apply a small buffer to fill in slivers and then reverse the buffer.
+    Note: The buffer distance should be chosen based on the coordinate system of your GeoDataFrame.
+    A very small value is usually sufficient and should be adjusted according to your specific needs.
+    """
+    # Apply a small buffer to fill in slivers
+    buffered_gdf = gdf.buffer(buffer_distance)
+
+    # Reverse the buffer to return to original size
+    unbuffered_gdf = buffered_gdf.buffer(-buffer_distance)
+
+    # Update the original GeoDataFrame geometries
+    gdf.geometry = unbuffered_gdf
+    gdf.crs = CRS
+
+    return gdf
+
+# ----> Feature Processing and Transformation <----
 
 
 def preprocess_compensatory_features(compensatory_features):
@@ -353,13 +421,6 @@ def preprocess_base_features(base_features, changing_features, unchanged_feature
     return base_features
 
 
-def get_value_with_warning(values, key):
-    if key not in values:
-        print(f"Warning: Value for {key} does not exist.")
-        return None  # or return a default value
-    return values[key]
-
-
 def calculate_intersection(changing_feature, buffer, context, file_base_name):
     context = context
     intersection = gpd.overlay(changing_feature, buffer, how='intersection')
@@ -380,15 +441,6 @@ def calculate_area(changing_feature):
     return changing_feature.area.sum()
 
 
-def print_results(file_base_name, buffer_distances, changing_feature_B1_area, changing_feature_B2_not_B1_area, changing_feature_outside_B2_area):
-    print(
-        f"Area of changing feature {file_base_name} intersecting with Buffer <{buffer_distances[0]}: {round(changing_feature_B1_area)}")
-    print(
-        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_distances[1]} but not {buffer_distances[0]}: {round(changing_feature_B2_not_B1_area)}")
-    print(
-        f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {round(changing_feature_outside_B2_area)}")
-
-
 def filter_features(scope, features):
     if not scope.empty:
         print('Filtering features')
@@ -399,69 +451,7 @@ def filter_features(scope, features):
         features = features[features.geometry.area > 0]
     return features
 
-
-def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
-
-    # Set the file name
-    file_name = f'Construction_{file_base_name}_buffer_{buffer_distance}_intersection'
-
-    # Set the directory name to be the same as the file name
-    new_dir = f'{OUTPUT_DIR}/{file_name}'
-    os.makedirs(new_dir, exist_ok=True)
-
-    # Save the shape in the new directory
-    changing_features.to_file(f'{new_dir}/{file_name}.shp')
-
-
-def resolve_overlaps(feature):
-    resolved_geometries = gpd.GeoDataFrame(columns=feature.columns)
-    for index, row in feature.iterrows():
-        current_geom = row.geometry
-        # Create a temporary GeoDataFrame for the current row to facilitate the use of concat
-        temp_gdf = gpd.GeoDataFrame([row], columns=feature.columns)
-
-        # Check for intersections with already resolved geometries (those with higher 'lagefaktor')
-        for _, r_geom in resolved_geometries.iterrows():
-            if current_geom.intersects(r_geom.geometry):
-                # If there's an intersection, difference the current geometry with the higher 'lagefaktor' geometry
-                current_geom = current_geom.difference(r_geom.geometry)
-
-        # If there's any geometry left after resolving intersections, add it to the resolved geometries
-        if not current_geom.is_empty:
-            # Update the geometry in the temporary GeoDataFrame
-            temp_gdf.geometry = [current_geom]
-
-            # Drop columns that are entirely NA or empty in both DataFrames before concatenating
-            resolved_geometries = resolved_geometries.dropna(how='all', axis=1)
-            temp_gdf = temp_gdf.dropna(how='all', axis=1)
-
-            resolved_geometries = pd.concat(
-                [resolved_geometries, temp_gdf], ignore_index=True)
-
-    # Explode any MultiPolygon geometries into individual Polygon geometries
-    resolved_geometries = resolved_geometries.explode(index_parts=True)
-    resolved_geometries.crs = CRS
-
-    return resolved_geometries
-
-
-def remove_slivers(gdf, buffer_distance=0.0001):
-    """
-    Apply a small buffer to fill in slivers and then reverse the buffer.
-    Note: The buffer distance should be chosen based on the coordinate system of your GeoDataFrame.
-    A very small value is usually sufficient and should be adjusted according to your specific needs.
-    """
-    # Apply a small buffer to fill in slivers
-    buffered_gdf = gdf.buffer(buffer_distance)
-
-    # Reverse the buffer to return to original size
-    unbuffered_gdf = buffered_gdf.buffer(-buffer_distance)
-
-    # Update the original GeoDataFrame geometries
-    gdf.geometry = unbuffered_gdf
-    gdf.crs = CRS
-
-    return gdf
+# ----> Value Assignment and Aggregation <----
 
 
 def add_lagefaktor_values(feature, lagefaktor_value):
@@ -580,6 +570,8 @@ def process_geodataframes(base_feature, cover_features, sort_by=None):
 
     return base_feature
 
+# ----> Feature Separation and Finalization <----
+
 
 def separate_features(scope, construction_feature, buffers, protected_area_features):
     global context
@@ -690,6 +682,32 @@ def process_scope(scope, construction_features, compensatory_features):
     scope.crs = CRS
 
     return scope
+
+# ----> Output Shapefile Creation <----
+
+
+def print_results(file_base_name, buffer_distances, changing_feature_B1_area, changing_feature_B2_not_B1_area, changing_feature_outside_B2_area):
+    print(
+        f"Area of changing feature {file_base_name} intersecting with Buffer <{buffer_distances[0]}: {round(changing_feature_B1_area)}")
+    print(
+        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_distances[1]} but not {buffer_distances[0]}: {round(changing_feature_B2_not_B1_area)}")
+    print(
+        f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {round(changing_feature_outside_B2_area)}")
+
+
+def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
+
+    # Set the file name
+    file_name = f'Construction_{file_base_name}_buffer_{buffer_distance}_intersection'
+
+    # Set the directory name to be the same as the file name
+    new_dir = f'{OUTPUT_DIR}/{file_name}'
+    os.makedirs(new_dir, exist_ok=True)
+
+    # Save the shape in the new directory
+    changing_features.to_file(f'{new_dir}/{file_name}.shp')
+
+# ----> Main Logic Flow <----
 
 
 interference = get_features(INTERFERENCE_DIR)
