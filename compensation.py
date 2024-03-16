@@ -7,6 +7,7 @@ import geopandas as gpd
 import pandas as pd
 import re
 import warnings
+import glob
 
 
 # Constants
@@ -24,7 +25,9 @@ parser = argparse.ArgumentParser(
     description='Calculate the final value of construction and compensatory features and create shapefiles for each feature.')
 
 # Add the arguments
-parser.add_argument('-n', '--new', metavar='project',
+parser.add_argument('project', metavar='project', type=str, nargs='?', default=None,
+                    help='the project name')
+parser.add_argument('-n', '--new', metavar='NewProjectName',
                     type=str, help='the new project name')
 parser.add_argument('-d', '--debug', action='store_true',
                     help='enable debug mode')
@@ -34,7 +37,7 @@ args = parser.parse_args()
 
 # Define directories
 dir_path = os.path.join(DATA_DIR, args.new) if args.new else os.path.join(
-    DATA_DIR, args.DirName)
+    DATA_DIR, args.project)
 SCOPE_DIR = os.path.join(dir_path, 'scope')
 CHANGING_DIR = os.path.join(dir_path, 'changing')
 CONSTRUCTION_DIR = os.path.join(dir_path, 'construction')
@@ -78,54 +81,6 @@ dirs = [OUTPUT_DIR, DEBUG_DIR]
 for dir in dirs:
     shutil.rmtree(dir, ignore_errors=True)
     os.makedirs(dir, exist_ok=True)
-
-# Define directories
-dir_path = os.path.join(DATA_DIR, args.new) if args.new else os.path.join(
-    DATA_DIR, args.DirName)
-SCOPE_DIR = os.path.join(dir_path, 'scope')
-CHANGING_DIR = os.path.join(dir_path, 'changing')
-CONSTRUCTION_DIR = os.path.join(dir_path, 'construction')
-UNCHANGING_DIR = os.path.join(dir_path, 'unchanging')
-COMPENSATORY_DIR = os.path.join(dir_path, 'compensatory')
-PROTECTED_DIR = os.path.join(dir_path, 'protected')
-OUTPUT_DIR = os.path.join(dir_path, 'output')
-DEBUG_DIR = os.path.join(dir_path, 'debug')
-INTERFERENCE_DIR = os.path.join(dir_path, 'interference')
-
-# List of directories to create
-dirs = [dir_path, SCOPE_DIR, CHANGING_DIR, CONSTRUCTION_DIR, UNCHANGING_DIR,
-        COMPENSATORY_DIR, PROTECTED_DIR, OUTPUT_DIR, DEBUG_DIR, INTERFERENCE_DIR]
-
-# If the --new argument is provided, create the project directory and all subdirectories
-if args.new:
-    # Create all directories
-    for dir in dirs:
-        os.makedirs(dir, exist_ok=True)
-
-    print(
-        f"New project '{args.new}' has been created with all necessary directories.")
-    sys.exit()
-
-# Check if the project directory exists and is empty
-if os.path.exists(dir_path) and not os.listdir(dir_path):
-    print(f"Project directory {dir_path} is empty.")
-    sys.exit()
-elif not os.path.exists(dir_path):
-    print(f"Project directory {dir_path} does not exist.")
-    sys.exit()
-
-# Create all directories
-for dir in dirs:
-    os.makedirs(dir, exist_ok=True)
-
-# List of directories to clean
-dirs = [OUTPUT_DIR, DEBUG_DIR]
-
-# Remove all files and subdirectories in each directory
-for dir in dirs:
-    shutil.rmtree(dir, ignore_errors=True)
-    os.makedirs(dir, exist_ok=True)
-
 
 BUFFER_DISTANCES = (100, 625)
 CHANGING_CONSTRUCTION_BASE_VALUES = {
@@ -153,6 +108,8 @@ output_data = {
 
 # Global variable to keep track of the context
 context = None
+
+# ----> Utility Functions <----
 
 
 def custom_warning(message, category, filename, lineno, file=None, line=None):
@@ -183,8 +140,6 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
 
 warnings.showwarning = custom_warning
 
-# ----> Utility Functions <----
-
 
 def get_value_with_warning(values, key):
     if key not in values:
@@ -195,37 +150,25 @@ def get_value_with_warning(values, key):
 # ----> Feature Retrieval and Initialization <----
 
 
+def read_shapefile(file_path):
+    print(f"Reading shapefile {os.path.basename(file_path)}")
+    feature = gpd.read_file(file_path)
+    feature = feature.to_crs(CRS)
+    feature = feature[['geometry']]
+    feature['type'] = os.path.basename(os.path.dirname(file_path))
+    return feature
+
+
 def get_features(dir):
-    # List to store changing features
-    features = []
-
-    # Traverse through all subdirectories
     print(f"Reading shapefiles from directory {dir}")
-    for root, dirs, files in os.walk(dir):
-        # Skip the shapefiles directly under 'dir'
-        if root != dir:
-            for file in files:
-                if file.endswith('.shp'):
-                    print(f"Reading shapefile {file}")
-                    full_file_path = os.path.join(root, file)
-                    feature = gpd.read_file(full_file_path)
-                    feature = feature.to_crs(CRS)
-                    feature = feature[['geometry']]
-                    # Get the name of the current subdirectory
-                    type = os.path.basename(root)
-                    feature['type'] = type
-                    features.append(feature)
+    shapefiles = glob.glob(f"{dir}/*/*.shp")
 
-    # Check if the list is empty
-    if not features:
+    if not shapefiles:
         print(f"No shapefiles found in directory {dir}")
-        # Return an empty GeoDataFrame with the same columns
         return gpd.GeoDataFrame(columns=['geometry', 'type'], crs=CRS)
 
-    # Concatenate all GeoDataFrames in the list into a single GeoDataFrame
+    features = [read_shapefile(shapefile) for shapefile in shapefiles]
     features_gdf = pd.concat(features, ignore_index=True)
-
-    # Ensure the resulting GeoDataFrame has the correct CRS
     features_gdf.set_crs(CRS, inplace=True)
 
     return features_gdf
