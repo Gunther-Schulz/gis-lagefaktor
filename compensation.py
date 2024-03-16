@@ -232,7 +232,9 @@ def cleanup_and_merge_features(feature, buffer_distance):
 
 def resolve_overlaps(feature):
     """
-    Resolves overlaps in geometries based on 'lagefaktor'.
+    Resolves overlaps in geometries. Geometries are resolved by subtracting overlapping geometries from the original geometry.
+    The sorting of the GeoDataFrame is important for the resolution of overlaps. 
+    Precedence is given to the first geometry in the GeoDataFrame.
 
     Parameters:
     - feature: GeoDataFrame with potential overlaps.
@@ -305,7 +307,7 @@ def preprocess_features(features, feature_type, buffer_distance=10):
     elif feature_type == 'protected_area':
         # Set 'protected' value based on 's_name'
         processed_features['protected'] = processed_features['s_name'].apply(
-            lambda x: CONSTRUCTION_PROTECTED_VALUES.get(x, None))
+            lambda x: get_value_with_warning(CONSTRUCTION_PROTECTED_VALUES, x))
     return processed_features
 
 
@@ -568,58 +570,13 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     ]
 
 
-# def calculate_total_value(dicts_list, grz):
-#     # Calculate the final value for each feature and summarize them
-#     grz_f = GRZ_FACTORS[grz]
-#     total_final_value = 0
-#     for feature_dict in dicts_list:
-#         feature = feature_dict['shape']
-#         feature['final_val'] = feature['base_value'] * \
-#             feature['lagefaktor'] * feature.geometry.area
-#         total_final_value += feature['final_val'].sum()
-
-#     total_final_value = (
-#         (total_final_value * grz_f[0]) * grz_f[1]) + ((total_final_value * grz_f[0]) * grz_f[2])
-#     total_final_value = round(total_final_value, 2)
-
-#     return total_final_value
-
-
-# def process_geometric_scope(scope, construction_features, compensatory_features):
-#     # merge and flatten construction_features and compensatory_features
-#     if scope.empty:
-#         scope = gpd.overlay(construction_features,
-#                             compensatory_features, how='union')
-#     # Explode MultiPolygon geometries into individual Polygon geometries
-#     scope = scope.explode(index_parts=False)
-
-#     # Filter to only include polygons
-#     scope = scope[scope.geometry.type == 'Polygon']
-
-#     scope = remove_slivers(scope, 0.001)
-
-#     # Merge overlapping polygons
-#     # Add a column with the same value for all rows
-#     scope["group"] = 0
-#     scope = scope.dissolve(by="group")
-
-#     # Explode MultiPolygon geometries into individual Polygon geometries again
-#     scope = scope.explode(index_parts=False)
-
-#     # Reset index
-#     scope = scope.reset_index(drop=True)
-
-#     scope.crs = CRS
-
-#     return scope
-
 def calculate_total_value(features, grz):
     """
     Calculate the total final value based on features and GRZ factors.
 
     Args:
         features (list of dict): List of feature dictionaries.
-        grz_factors (tuple): A tuple containing GRZ factors.
+        grz (str): The GRZ factor.
 
     Returns:
         float: The total final value, rounded to 2 decimal places.
@@ -689,106 +646,105 @@ def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance)
     # Save the shape in the new directory
     changing_features.to_file(f'{new_dir}/{file_name}.shp')
 
+
+def process_features(directory, feature_type, unchanged_features, changing_features, changing_values):
+    features = get_features(directory)
+    features = preprocess_features(features, feature_type)
+    features = process_and_overlay_features(
+        features, unchanged_features, changing_features, changing_values)
+    return features
+
+
+def calculate_and_sum_values(features, scope):
+    total = 0
+    for file in features['s_name'].unique():
+        current_features = filter_features(
+            scope, features[features['s_name'] == file])
+        current_features['final_v'] = current_features.apply(
+            lambda row: calculate_value(row, current_features), axis=1)
+        total += current_features['final_v'].sum()
+        write_attribute_data(current_features, 'compensatory')
+        save_features_to_file(current_features, 'Compensatory_' + file)
+    return total
+
+
+def write_attribute_data(features, feature_type):
+    column_names = [col for col in features.columns if col != 'geometry']
+    for _, row in features.iterrows():
+        attribute_data = [(column, row[column]) for column in column_names]
+        output_data[feature_type].append(attribute_data)
+
+
+def save_features_to_file(features, filename):
+    features.to_file(os.path.join(OUTPUT_DIR, filename),
+                     driver='ESRI Shapefile')
+
+
+def calculate_value(row, current_features):
+    if row.geometry.area >= 2000:
+        print('Calculating value for area >= 2000')
+        final_v = (row['compensat'] - row['base_value']) * row.geometry.area
+        if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
+            final_v = final_v * \
+                COMPENSATORY_PROTECTED_VALUES[row['protecte_f']]
+        return final_v
+    else:
+        return 0
+
+
+def check_and_warn_column_length(df, limit):
+    """
+    Check the length of all columns in a DataFrame and issue a warning if any exceeds a limit.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame to check.
+        limit (int): The maximum allowed length.
+    """
+    for column_name in df.columns:
+        if len(df[column_name]) > limit:
+            print(
+                f"Warning: The length of column '{column_name}' exceeds the limit of {limit}.")
+
 # ----> Main Logic Flow <----
 
 
 interference = get_features(INTERFERENCE_DIR)
 buffers = get_buffers(interference, BUFFER_GEN_DISTANCES)
 scope = get_features(SCOPE_DIR)
-compensatory_features = get_features(COMPENSATORY_DIR)
-construction_features = get_features(CONSTRUCTION_DIR)
-changing_features = get_features(CHANGING_DIR)
+
 unchanging_features = get_features(UNCHANGING_DIR)
+changing_features = get_features(CHANGING_DIR)
+
+construction_features = process_features(
+    CONSTRUCTION_DIR, 'construction', unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
+
+compensatory_features = process_features(
+    COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
+
 protected_area_features = get_features(PROTECTED_DIR)
-
-scope = process_geometric_scope(
-    scope, construction_features, compensatory_features)
-
 protected_area_features = preprocess_features(
     protected_area_features, 'protected_area')
 
-construction_features = process_and_overlay_features(
-    construction_features, unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
-
-compensatory_features = preprocess_features(
-    compensatory_features, 'compensatory')
-# def process_base_features(base_features, unchanged_features, changing_features, values):
-compensatory_features = process_and_overlay_features(
-    compensatory_features, unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
-output_shapes = []
 output_shapes = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
-combined_features = pd.concat([
-    output_shapes[0]['shape'], output_shapes[1]['shape'], output_shapes[2]['shape']
-])
+combined_features = pd.concat([shape['shape'] for shape in output_shapes])
 total_final_value = calculate_total_value(combined_features, GRZ)
 print(f"Total final value: {total_final_value}")
 
-
-# create shapes
 for lagefaktor_shape in output_shapes:
-    # Check if any column name is longer than 10 characters
-    for column in lagefaktor_shape['shape'].columns:
-        if len(column) > 10:
-            print(
-                f"Warning: Column name '{column}' is longer than 10 characters.")
-
+    check_and_warn_column_length(
+        lagefaktor_shape['shape'], 10)
     if lagefaktor_shape is output_shapes[-1]:
-        lagefaktor_shape['file_base_name'] = lagefaktor_shape['file_base_name'] + '_over'
+        lagefaktor_shape['file_base_name'] += '_over'
+    write_attribute_data(lagefaktor_shape['shape'], 'construction')
+    create_lagefaktor_shapes(
+        lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
 
-    # write attribute data to output_data
-    column_names = [
-        col for col in lagefaktor_shape['shape'].columns if col != 'geometry']
-
-    for _, row in lagefaktor_shape['shape'].iterrows():
-        attribute_data = [(column, row[column]) for column in column_names]
-        output_data['construction'].append(attribute_data)
-
-        create_lagefaktor_shapes(
-            lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
-
-# create shapes for compensatory features, one shape file for each from in attribute 's_name'
-total = 0
-for file in compensatory_features['s_name'].unique():
-    # Get the features for the current file
-    current_features = compensatory_features[compensatory_features['s_name'] == file]
-    current_features = filter_features(scope, current_features)
-
-    # TODO: Alle Komp.Flächen müssen > 2000 m² sein ?
-    def calculate_value(row):
-        if row.geometry.area >= 2000:
-            print('Calculating value for area >= 2000')
-            final_v = (row['compensat'] - row['base_value']) * \
-                row.geometry.area
-            if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
-                final_v = final_v * \
-                    COMPENSATORY_PROTECTED_VALUES[row['protecte_f']]
-            return final_v
-        else:
-            return 0
-
-    current_features['final_v'] = current_features.apply(
-        calculate_value, axis=1)
-
-    # Summarize and add to total
-    total += current_features['final_v'].sum()
-
-    # write attribute data to output_data
-    column_names = [
-        col for col in current_features.columns if col != 'geometry']
-
-    for _, row in current_features.iterrows():
-        attribute_data = [(column, row[column]) for column in column_names]
-        output_data['compensatory'].append(attribute_data)
-
-    # Save the GeoDataFrame to a file in the output directory
-    current_features.to_file(os.path.join(
-        OUTPUT_DIR, 'Compensatory_' + file), driver='ESRI Shapefile')
+total = calculate_and_sum_values(compensatory_features, scope)
 print(f"Total final value for compensatory features: {round(total, 2)}")
-
 # pp = pprint.PrettyPrinter(indent=4)
 # pp.pprint(output_data)
