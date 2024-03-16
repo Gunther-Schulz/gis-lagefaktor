@@ -517,50 +517,51 @@ def consolidate_columns(feature):
 # ----> Feature Separation and Finalization <----
 
 
+def calculate_intersection_area(construction_feature, buffer, buffer_distance, protected_area_features, file_name, scope):
+    """
+    Calculate the intersection area of construction features with a buffer and process overlaps.
+    """
+    intersection = calculate_overlay(
+        construction_feature, buffer, 'intersection', f'intersects with Buffer {buffer_distance}', file_name)
+    intersection = process_geodataframe_overlaps(
+        intersection, protected_area_features, 'protected')
+    intersection = add_lagefaktor_values(
+        intersection, CONSTRUCTION_LAGEFAKTOR_VALUES[buffer_distance])
+    intersection = filter_features(scope, intersection)
+    intersection['buffer_dis'] = buffer_distance
+    return intersection
+
+
 def separate_features(scope, construction_feature, buffers, protected_area_features):
-    global context
-    # TODO: we can hondly handle a singl construction feature at this time (ususally Baufled)
+    """
+    Separate features based on their intersection with different buffer zones and process them.
+    """
     file_name = construction_feature['s_name'].iloc[0]
 
-    # Calculate intersections
-    changing_feature_B1_intersection = calculate_overlay(
-        construction_feature, buffers[0], 'intersection', 'intersects with Buffer <100', file_name)
-    changing_feature_B1_intersection = process_geodataframe_overlaps(
-        changing_feature_B1_intersection, protected_area_features, 'protected')
-    changing_feature_B1_intersection = add_lagefaktor_values(
-        changing_feature_B1_intersection, CONSTRUCTION_LAGEFAKTOR_VALUES['<100'])
-    changing_feature_B1_intersection = filter_features(scope,
-                                                       changing_feature_B1_intersection)
-    # add attribute buffer_distance
-    changing_feature_B1_intersection['buffer_dis'] = '<100'
+    # Calculate intersections for each buffer zone
+    changing_feature_B1_intersection = calculate_intersection_area(
+        construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, file_name, scope)
 
-    changing_feature_B2_intersection = calculate_overlay(
-        construction_feature, buffers[1], 'intersection', 'intersects with Buffer >100 <625', file_name)
+    changing_feature_B2_intersection = calculate_intersection_area(
+        construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, file_name, scope)
 
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
     changing_feature_B2_not_B1 = calculate_overlay(
         changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference',
         'intersects with Buffer >100 <625 but not Buffer <100', file_name)
-    changing_feature_B2_not_B1 = process_geodataframe_overlaps(
-        changing_feature_B2_not_B1, protected_area_features, 'protected')
-    changing_feature_B2_not_B1 = add_lagefaktor_values(
-        changing_feature_B2_not_B1, CONSTRUCTION_LAGEFAKTOR_VALUES['>100<625'])
-    changing_feature_B2_not_B1 = filter_features(
-        scope, changing_feature_B2_not_B1)
-    changing_feature_B2_not_B1['buffer_dis'] = '>100<625'
 
-    # Calculate area outside B2
+    # Calculate area outside B2 by taking the difference between the construction feature and buffer B2
     changing_feature_outside_B2 = calculate_overlay(
         construction_feature, buffers[1], 'difference', 'outside Buffer >625', file_name)
     changing_feature_outside_B2 = process_geodataframe_overlaps(
         changing_feature_outside_B2, protected_area_features, 'protected')
     changing_feature_outside_B2 = add_lagefaktor_values(
-        changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES['>625'])
+        changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES[BUFFER_DISTANCES['>625']])
     changing_feature_outside_B2 = filter_features(
         scope, changing_feature_outside_B2)
-    changing_feature_outside_B2['buffer_dis'] = '>625'
+    changing_feature_outside_B2['buffer_dis'] = BUFFER_DISTANCES['>625']
 
-    # Calculate area
+    # Calculate area for each feature
     changing_feature_outside_B2_area = calculate_area(
         changing_feature_outside_B2)
     changing_feature_B2_not_B1_area = calculate_area(
@@ -569,16 +570,16 @@ def separate_features(scope, construction_feature, buffers, protected_area_featu
         changing_feature_B1_intersection)
 
     # Print the results
-    print_results(file_name, BUFFER_GEN_DISTANCES, changing_feature_B1_intersection_area,
+    print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
                   changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
 
     return [
-        {'shape': changing_feature_B1_intersection,
-            'file_base_name': file_name, 'buffer_distance': BUFFER_GEN_DISTANCES[0]},
+        {'shape': changing_feature_B1_intersection, 'file_base_name': file_name,
+            'buffer_distance': BUFFER_DISTANCES['<100']},
         {'shape': changing_feature_B2_not_B1, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_GEN_DISTANCES[1]},
+            'buffer_distance': BUFFER_DISTANCES['>100<625']},
         {'shape': changing_feature_outside_B2, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_GEN_DISTANCES[1]}
+            'buffer_distance': BUFFER_DISTANCES['>625']}
     ]
 
 
@@ -631,12 +632,13 @@ def process_scope(scope, construction_features, compensatory_features):
 
 
 def print_results(file_base_name, buffer_distances, changing_feature_B1_area, changing_feature_B2_not_B1_area, changing_feature_outside_B2_area):
+    buffer_keys = list(buffer_distances.keys())
     print(
-        f"Area of changing feature {file_base_name} intersecting with Buffer <{buffer_distances[0]}: {round(changing_feature_B1_area)}")
+        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[0]}: {round(changing_feature_B1_area)}")
     print(
-        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_distances[1]} but not {buffer_distances[0]}: {round(changing_feature_B2_not_B1_area)}")
+        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[1]} but not {buffer_keys[0]}: {round(changing_feature_B2_not_B1_area)}")
     print(
-        f"Area of changing feature {file_base_name} outside Buffer {buffer_distances[1]}: {round(changing_feature_outside_B2_area)}")
+        f"Area of changing feature {file_base_name} outside Buffer {buffer_keys[1]}: {round(changing_feature_outside_B2_area)}")
 
 
 def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
