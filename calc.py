@@ -596,7 +596,6 @@ def calculate_total_final_value(dicts_list, grz):
 def process_scope(scope, construction_features, compensatory_features):
     # merge and flatten construction_features and compensatory_features
     if scope.empty:
-        # scope = gpd.overlay(scope, construction_features, how='union')
         scope = gpd.overlay(construction_features,
                             compensatory_features, how='union')
     # Explode MultiPolygon geometries into individual Polygon geometries
