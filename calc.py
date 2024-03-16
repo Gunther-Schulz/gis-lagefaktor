@@ -46,14 +46,14 @@ CHANGING_CONSTRUCTION_BASE_VALUES = {
 
 CONSTRUCTION_LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1, '>625': 1.25}
 CONSTRUCTION_PROTECTED_VALUES = {
-    'NSG': 1.5, 'VSG': 1.25, 'Test': 10, 'Test2': 20}
+    'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.5, 'Test': 10, 'Test2': 20}
 
 # TODO:
 CHANGING_COMPENSATORY_BASE_VALUES = {'Acker': 0, 'Grünland': 0, 'weg': 0}
 COMPENSATORY_MEASURE_VALUES = {
     'Grünfläche': 3, "comp_test": 10}
 COMPENSATORY_PROTECTED_VALUES = {
-    'NSG': 1.1, 'VSG': 1.15, 'FFH-LTR': 1.25, 'Test': 2, 'Test2': 4}
+    'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
 
 # List of directories to create
 dirs = [DATA_DIR, CONSTRUCTION_DIR, UNCHANGING_DIR, OUTPUT_DIR,
@@ -596,8 +596,9 @@ def calculate_total_final_value(dicts_list, grz):
 def process_scope(scope, construction_features, compensatory_features):
     # merge and flatten construction_features and compensatory_features
     if scope.empty:
-        scope = gpd.overlay(scope, construction_features, how='union')
-        scope = gpd.overlay(scope, compensatory_features, how='union')
+        # scope = gpd.overlay(scope, construction_features, how='union')
+        scope = gpd.overlay(construction_features,
+                            compensatory_features, how='union')
     # Explode MultiPolygon geometries into individual Polygon geometries
     scope = scope.explode(index_parts=False)
 
