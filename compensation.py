@@ -356,21 +356,6 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     return base_features
 
 
-# def calculate_overlay(changing_feature, buffer, context, file_base_name):
-#     context = context
-#     intersection = gpd.overlay(changing_feature, buffer, how='intersection')
-
-#     return intersection
-
-
-# def calculate_difference(feature1, feature2, context, file_base_name):
-
-#     context = context
-#     difference = gpd.overlay(
-#         feature1, feature2, how='difference')
-
-#     return difference
-
 def calculate_overlay(feature1, feature2, operation, context, file_base_name):
     """
     Calculate the geometric overlay between two features.
@@ -532,7 +517,7 @@ def calculate_intersection_area(construction_feature, buffer, buffer_distance, p
     return intersection
 
 
-def separate_features(scope, construction_feature, buffers, protected_area_features):
+def process_and_separate_buffer_zones(scope, construction_feature, buffers, protected_area_features):
     """
     Separate features based on their intersection with different buffer zones and process them.
     """
@@ -583,47 +568,98 @@ def separate_features(scope, construction_feature, buffers, protected_area_featu
     ]
 
 
-def calculate_total_final_value(dicts_list, grz):
-    # Calculate the final value for each feature and summarize them
-    grz_f = GRZ_FACTORS[grz]
-    total_final_value = 0
-    for feature_dict in dicts_list:
-        feature = feature_dict['shape']
-        feature['final_val'] = feature['base_value'] * \
-            feature['lagefaktor'] * feature.geometry.area
-        total_final_value += feature['final_val'].sum()
+# def calculate_total_value(dicts_list, grz):
+#     # Calculate the final value for each feature and summarize them
+#     grz_f = GRZ_FACTORS[grz]
+#     total_final_value = 0
+#     for feature_dict in dicts_list:
+#         feature = feature_dict['shape']
+#         feature['final_val'] = feature['base_value'] * \
+#             feature['lagefaktor'] * feature.geometry.area
+#         total_final_value += feature['final_val'].sum()
 
-    total_final_value = (
-        (total_final_value * grz_f[0]) * grz_f[1]) + ((total_final_value * grz_f[0]) * grz_f[2])
-    total_final_value = round(total_final_value, 2)
+#     total_final_value = (
+#         (total_final_value * grz_f[0]) * grz_f[1]) + ((total_final_value * grz_f[0]) * grz_f[2])
+#     total_final_value = round(total_final_value, 2)
 
-    return total_final_value
+#     return total_final_value
 
 
-def process_scope(scope, construction_features, compensatory_features):
-    # merge and flatten construction_features and compensatory_features
+# def process_geometric_scope(scope, construction_features, compensatory_features):
+#     # merge and flatten construction_features and compensatory_features
+#     if scope.empty:
+#         scope = gpd.overlay(construction_features,
+#                             compensatory_features, how='union')
+#     # Explode MultiPolygon geometries into individual Polygon geometries
+#     scope = scope.explode(index_parts=False)
+
+#     # Filter to only include polygons
+#     scope = scope[scope.geometry.type == 'Polygon']
+
+#     scope = remove_slivers(scope, 0.001)
+
+#     # Merge overlapping polygons
+#     # Add a column with the same value for all rows
+#     scope["group"] = 0
+#     scope = scope.dissolve(by="group")
+
+#     # Explode MultiPolygon geometries into individual Polygon geometries again
+#     scope = scope.explode(index_parts=False)
+
+#     # Reset index
+#     scope = scope.reset_index(drop=True)
+
+#     scope.crs = CRS
+
+#     return scope
+
+def calculate_total_value(features, grz):
+    """
+    Calculate the total final value based on features and GRZ factors.
+
+    Args:
+        features (list of dict): List of feature dictionaries.
+        grz_factors (tuple): A tuple containing GRZ factors.
+
+    Returns:
+        float: The total final value, rounded to 2 decimal places.
+    """
+
+    total_value = 0
+    for _, feature in features.iterrows():
+        area = feature.geometry.area
+        total_value += feature['base_value'] * feature['lagefaktor'] * area
+
+    factor_a, factor_b, factor_c = GRZ_FACTORS[grz]
+    total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
+    return round(total_value_adjusted, 2)
+
+
+def process_geometric_scope(scope, construction_features, compensatory_features, sliver_threshold=0.001):
+    """
+    Process and merge geometric features for a given scope.
+
+    Args:
+        scope (GeoDataFrame): The initial scope GeoDataFrame.
+        construction_features (GeoDataFrame): GeoDataFrame of construction features.
+        compensatory_features (GeoDataFrame): GeoDataFrame of compensatory features.
+        sliver_threshold (float): Threshold for removing slivers.
+
+    Returns:
+        GeoDataFrame: The processed scope GeoDataFrame.
+    """
     if scope.empty:
         scope = gpd.overlay(construction_features,
                             compensatory_features, how='union')
-    # Explode MultiPolygon geometries into individual Polygon geometries
-    scope = scope.explode(index_parts=False)
 
-    # Filter to only include polygons
+    scope = scope.explode(index_parts=False)
     scope = scope[scope.geometry.type == 'Polygon']
+    scope = remove_slivers(scope, sliver_threshold)
 
-    scope = remove_slivers(scope, 0.001)
-
-    # Merge overlapping polygons
-    # Add a column with the same value for all rows
-    scope["group"] = 0
-    scope = scope.dissolve(by="group")
-
-    # Explode MultiPolygon geometries into individual Polygon geometries again
-    scope = scope.explode(index_parts=False)
-
-    # Reset index
-    scope = scope.reset_index(drop=True)
-
+    # Simplify merging overlapping polygons by assigning a constant group value
+    scope['group'] = 0
+    scope = scope.dissolve(by='group').explode(
+        index_parts=False).reset_index(drop=True)
     scope.crs = CRS
 
     return scope
@@ -665,7 +701,8 @@ changing_features = get_features(CHANGING_DIR)
 unchanging_features = get_features(UNCHANGING_DIR)
 protected_area_features = get_features(PROTECTED_DIR)
 
-scope = process_scope(scope, construction_features, compensatory_features)
+scope = process_geometric_scope(
+    scope, construction_features, compensatory_features)
 
 protected_area_features = preprocess_features(
     protected_area_features, 'protected_area')
@@ -682,11 +719,13 @@ compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
 output_shapes = []
-output_shapes = separate_features(
+output_shapes = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
-
-total_final_value = calculate_total_final_value(output_shapes, GRZ)
+combined_features = pd.concat([
+    output_shapes[0]['shape'], output_shapes[1]['shape'], output_shapes[2]['shape']
+])
+total_final_value = calculate_total_value(combined_features, GRZ)
 print(f"Total final value: {total_final_value}")
 
 
