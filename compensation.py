@@ -226,118 +226,125 @@ def cleanup_and_merge_features(feature, buffer_distance):
 
 
 def resolve_overlaps(feature):
-    resolved_geometries = gpd.GeoDataFrame(columns=feature.columns)
-    for index, row in feature.iterrows():
+    """
+    Resolves overlaps in geometries based on 'lagefaktor'.
+
+    Parameters:
+    - feature: GeoDataFrame with potential overlaps.
+
+    Returns:
+    - GeoDataFrame with resolved geometries.
+    """
+    resolved = gpd.GeoDataFrame(columns=feature.columns)
+
+    for _, row in feature.iterrows():
         current_geom = row.geometry
-        # Create a temporary GeoDataFrame for the current row to facilitate the use of concat
         temp_gdf = gpd.GeoDataFrame([row], columns=feature.columns)
 
-        # Check for intersections with already resolved geometries (those with higher 'lagefaktor')
-        for _, r_geom in resolved_geometries.iterrows():
-            if current_geom.intersects(r_geom.geometry):
-                # If there's an intersection, difference the current geometry with the higher 'lagefaktor' geometry
-                current_geom = current_geom.difference(r_geom.geometry)
+        for _, r_row in resolved.iterrows():
+            if current_geom.intersects(r_row.geometry):
+                current_geom = current_geom.difference(r_row.geometry)
 
-        # If there's any geometry left after resolving intersections, add it to the resolved geometries
         if not current_geom.is_empty:
-            # Update the geometry in the temporary GeoDataFrame
             temp_gdf.geometry = [current_geom]
+            # Exclude empty or all-NA columns before concatenation
+            temp_gdf.dropna(how='all', axis=1, inplace=True)
+            resolved.dropna(how='all', axis=1, inplace=True)
+            resolved = pd.concat([resolved, temp_gdf], ignore_index=True)
 
-            # Drop columns that are entirely NA or empty in both DataFrames before concatenating
-            resolved_geometries = resolved_geometries.dropna(how='all', axis=1)
-            temp_gdf = temp_gdf.dropna(how='all', axis=1)
+    resolved = resolved.explode(index_parts=True)
+    resolved.crs = CRS
 
-            resolved_geometries = pd.concat(
-                [resolved_geometries, temp_gdf], ignore_index=True)
-
-    # Explode any MultiPolygon geometries into individual Polygon geometries
-    resolved_geometries = resolved_geometries.explode(index_parts=True)
-    resolved_geometries.crs = CRS
-
-    return resolved_geometries
+    return resolved
 
 
 def remove_slivers(gdf, buffer_distance=0.0001):
     """
-    Apply a small buffer to fill in slivers and then reverse the buffer.
-    Note: The buffer distance should be chosen based on the coordinate system of your GeoDataFrame.
-    A very small value is usually sufficient and should be adjusted according to your specific needs.
+    Removes slivers from geometries by applying a small buffer.
+
+    Parameters:
+    - gdf: GeoDataFrame to be processed.
+    - buffer_distance: Distance for buffering operations.
+
+    Returns:
+    - GeoDataFrame with slivers removed.
     """
-    # Apply a small buffer to fill in slivers
-    buffered_gdf = gdf.buffer(buffer_distance)
-
-    # Reverse the buffer to return to original size
-    unbuffered_gdf = buffered_gdf.buffer(-buffer_distance)
-
-    # Update the original GeoDataFrame geometries
-    gdf.geometry = unbuffered_gdf
+    gdf.geometry = gdf.geometry.buffer(
+        buffer_distance).buffer(-buffer_distance)
     gdf.crs = CRS
-
     return gdf
 
 # ----> Feature Processing and Transformation <----
 
 
-def preprocess_compensatory_features(compensatory_features):
-    cleaned_compensatory_features = cleanup_and_merge_features(
-        compensatory_features, buffer_distance=10)
-    # Use map to assign 'compensat' for each item based on its 's_name'
-    cleaned_compensatory_features['compensat'] = cleaned_compensatory_features['s_name'].map(
-        lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
+def preprocess_features(features, feature_type, buffer_distance=10):
+    """
+    Generalized function to preprocess different types of features.
 
-    return cleaned_compensatory_features
+    Parameters:
+    - features: GeoDataFrame of features to be processed.
+    - feature_type: Type of features being processed ('compensatory', 'protected_area', or 'base').
+    - buffer_distance: Buffer distance for cleanup and merge operation, default is 10.
+
+    Returns:
+    - Processed GeoDataFrame.
+    """
+    # Cleanup and merge features
+    processed_features = cleanup_and_merge_features(
+        features, buffer_distance=buffer_distance)
+
+    if feature_type == 'compensatory':
+        # Assign 'compensat' based on 's_name'
+        processed_features['compensat'] = processed_features['s_name'].map(
+            lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
+    elif feature_type == 'protected_area':
+        # Set 'protected' value based on 's_name'
+        processed_features['protected'] = processed_features['s_name'].apply(
+            lambda x: CONSTRUCTION_PROTECTED_VALUES.get(x, None))
+    # elif feature_type == 'construction':
+    #     # Additional processing for base features
+    #     processed_features['protected'] = processed_features['s_name'].apply(
+    #         lambda x: CHANGING_CONSTRUCTION_BASE_VALUES.get(x, None))
+    #     processed_features = process_base_features(processed_features)
+
+    return processed_features
 
 
-def preprocess_protected_area_features(protected_area_features):
-    # Iterate over each row in the GeoDataFrame
-    for index, row in protected_area_features.iterrows():
-        # Get the 's_name' for the current row
-        type = row['s_name']
-        # Set the 'protected' value for the current row
-        protected_area_features.at[index,
-                                   'protected'] = CONSTRUCTION_PROTECTED_VALUES[type]
-    return protected_area_features
+def process_base_features(base_features, unchanged_features, changing_features, values):
+    """
+    Additional processing specific to base features.
 
+    Parameters:
+    - base_features: GeoDataFrame of base features.
 
-def preprocess_base_features(base_features, changing_features, unchanged_features, values):
-
-    # Buffer, dissolve and reduce buffer for unchanged_features
-    unchanged_features = cleanup_and_merge_features(
-        unchanged_features, buffer_distance=10)
-
-    changing_features = cleanup_and_merge_features(
-        changing_features, buffer_distance=10)
-
-    base_features = cleanup_and_merge_features(
-        base_features, buffer_distance=10)
+    Returns:
+    - Processed GeoDataFrame.
+    """
+    # # Assuming unchanged_features and changing_features are defined globally or passed as parameters
+    # global unchanged_features, changing_features, values
 
     # Rename 's_name' column in changing_features
     changing_features = changing_features.rename(
         columns={'s_name': 'changing_f'})
 
-    # punch holes
+    # Punch holes
     changing_features = gpd.overlay(
         changing_features, unchanged_features, how='difference')
 
-    # Overlay construction_features with changing_features
+    # Overlay base_features with changing_features
     intersected_features = gpd.overlay(
         base_features, changing_features, how='intersection')
 
-    # Select only the columns from construction_features
+    # Select only the columns from base_features and add 'changing_f'
     intersected_features = intersected_features[base_features.columns]
-    # Also add the 'changing_file_name' column
     intersected_features['changing_f'] = changing_features['changing_f']
 
-    # Flatten the result into a single geometry and keep the first unique value for each group of data
+    # Flatten the result into a single geometry and keep the first unique value for each group
     base_features = intersected_features.dissolve(
-        by='s_name', aggfunc='first')
+        by='s_name', aggfunc='first').explode(index_parts=False)
 
-    # explode
-    base_features = base_features.explode(index_parts=False)
-
-    # Reset the index of base_features and changing_features
+    # Reset the index
     base_features.reset_index(drop=False, inplace=True)
-    changing_features.reset_index(drop=False, inplace=True)
 
     # Merge the base_features with the changing_features
     base_features['base_value'] = base_features['changing_f'].map(
@@ -646,15 +653,17 @@ protected_area_features = get_features(PROTECTED_DIR)
 
 scope = process_scope(scope, construction_features, compensatory_features)
 
-protected_area_features = preprocess_protected_area_features(
-    protected_area_features)
+protected_area_features = preprocess_features(
+    protected_area_features, 'protected_area')
 
-construction_features = preprocess_base_features(
-    construction_features, changing_features, unchanging_features, CHANGING_CONSTRUCTION_BASE_VALUES)
+construction_features = process_base_features(
+    construction_features, unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
 
-compensatory_features = preprocess_compensatory_features(compensatory_features)
-compensatory_features = preprocess_base_features(
-    compensatory_features, changing_features, unchanging_features, CHANGING_COMPENSATORY_BASE_VALUES)
+compensatory_features = preprocess_features(
+    compensatory_features, 'compensatory')
+# def process_base_features(base_features, unchanged_features, changing_features, values):
+compensatory_features = process_base_features(
+    compensatory_features, unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
