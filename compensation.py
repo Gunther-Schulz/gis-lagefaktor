@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import sys
 import shutil
 import os
 import argparse
@@ -17,19 +18,23 @@ GRZ_FACTORS = {
     '0.75': [0.75, 0.5, 0.8]
 }
 
+
 # Create the parser
-parser = argparse.ArgumentParser(description='Process some integers.')
+parser = argparse.ArgumentParser(
+    description='Calculate the final value of construction and compensatory features and create shapefiles for each feature.')
 
 # Add the arguments
-parser.add_argument('DirName', metavar='DirName',
-                    type=str, help='the directory name')
-parser.add_argument('--debug', action='store_true', help='enable debug mode')
+parser.add_argument('-n', '--new', metavar='project',
+                    type=str, help='the new project name')
+parser.add_argument('-d', '--debug', action='store_true',
+                    help='enable debug mode')
 
 # Parse the arguments
 args = parser.parse_args()
 
 # Define directories
-dir_path = os.path.join(DATA_DIR, args.DirName)
+dir_path = os.path.join(DATA_DIR, args.new) if args.new else os.path.join(
+    DATA_DIR, args.DirName)
 SCOPE_DIR = os.path.join(dir_path, 'scope')
 CHANGING_DIR = os.path.join(dir_path, 'changing')
 CONSTRUCTION_DIR = os.path.join(dir_path, 'construction')
@@ -39,6 +44,88 @@ PROTECTED_DIR = os.path.join(dir_path, 'protected')
 OUTPUT_DIR = os.path.join(dir_path, 'output')
 DEBUG_DIR = os.path.join(dir_path, 'debug')
 INTERFERENCE_DIR = os.path.join(dir_path, 'interference')
+
+# List of directories to create
+dirs = [dir_path, SCOPE_DIR, CHANGING_DIR, CONSTRUCTION_DIR, UNCHANGING_DIR,
+        COMPENSATORY_DIR, PROTECTED_DIR, OUTPUT_DIR, DEBUG_DIR, INTERFERENCE_DIR]
+
+# If the --new argument is provided, create the project directory and all subdirectories
+if args.new:
+    # Create all directories
+    for dir in dirs:
+        os.makedirs(dir, exist_ok=True)
+
+    print(
+        f"New project '{args.new}' has been created with all necessary directories.")
+    sys.exit()
+
+# Check if the project directory exists and is empty
+if os.path.exists(dir_path) and not os.listdir(dir_path):
+    print(f"Project directory {dir_path} is empty.")
+    sys.exit()
+elif not os.path.exists(dir_path):
+    print(f"Project directory {dir_path} does not exist.")
+    sys.exit()
+
+# Create all directories
+for dir in dirs:
+    os.makedirs(dir, exist_ok=True)
+
+# List of directories to clean
+dirs = [OUTPUT_DIR, DEBUG_DIR]
+
+# Remove all files and subdirectories in each directory
+for dir in dirs:
+    shutil.rmtree(dir, ignore_errors=True)
+    os.makedirs(dir, exist_ok=True)
+
+# Define directories
+dir_path = os.path.join(DATA_DIR, args.new) if args.new else os.path.join(
+    DATA_DIR, args.DirName)
+SCOPE_DIR = os.path.join(dir_path, 'scope')
+CHANGING_DIR = os.path.join(dir_path, 'changing')
+CONSTRUCTION_DIR = os.path.join(dir_path, 'construction')
+UNCHANGING_DIR = os.path.join(dir_path, 'unchanging')
+COMPENSATORY_DIR = os.path.join(dir_path, 'compensatory')
+PROTECTED_DIR = os.path.join(dir_path, 'protected')
+OUTPUT_DIR = os.path.join(dir_path, 'output')
+DEBUG_DIR = os.path.join(dir_path, 'debug')
+INTERFERENCE_DIR = os.path.join(dir_path, 'interference')
+
+# List of directories to create
+dirs = [dir_path, SCOPE_DIR, CHANGING_DIR, CONSTRUCTION_DIR, UNCHANGING_DIR,
+        COMPENSATORY_DIR, PROTECTED_DIR, OUTPUT_DIR, DEBUG_DIR, INTERFERENCE_DIR]
+
+# If the --new argument is provided, create the project directory and all subdirectories
+if args.new:
+    # Create all directories
+    for dir in dirs:
+        os.makedirs(dir, exist_ok=True)
+
+    print(
+        f"New project '{args.new}' has been created with all necessary directories.")
+    sys.exit()
+
+# Check if the project directory exists and is empty
+if os.path.exists(dir_path) and not os.listdir(dir_path):
+    print(f"Project directory {dir_path} is empty.")
+    sys.exit()
+elif not os.path.exists(dir_path):
+    print(f"Project directory {dir_path} does not exist.")
+    sys.exit()
+
+# Create all directories
+for dir in dirs:
+    os.makedirs(dir, exist_ok=True)
+
+# List of directories to clean
+dirs = [OUTPUT_DIR, DEBUG_DIR]
+
+# Remove all files and subdirectories in each directory
+for dir in dirs:
+    shutil.rmtree(dir, ignore_errors=True)
+    os.makedirs(dir, exist_ok=True)
+
 
 BUFFER_DISTANCES = (100, 625)
 CHANGING_CONSTRUCTION_BASE_VALUES = {
@@ -54,23 +141,6 @@ COMPENSATORY_MEASURE_VALUES = {
     'Grünfläche': 3, "comp_test": 10}
 COMPENSATORY_PROTECTED_VALUES = {
     'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
-
-# List of directories to create
-dirs = [DATA_DIR, CONSTRUCTION_DIR, UNCHANGING_DIR, OUTPUT_DIR,
-        DEBUG_DIR, INTERFERENCE_DIR, COMPENSATORY_DIR, PROTECTED_DIR]
-
-# Create all directories
-for dir in dirs:
-    os.makedirs(dir, exist_ok=True)
-
-# List of directories to clean
-dirs = [OUTPUT_DIR, DEBUG_DIR]
-
-
-# Remove all files and subdirectories in each directory
-for dir in dirs:
-    shutil.rmtree(dir, ignore_errors=True)
-    os.makedirs(dir, exist_ok=True)
 
 output_data = {
     'construction': [

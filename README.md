@@ -2,19 +2,17 @@
 
 ## Usage
 
+### Running the script
+
     ```bash
-    python3 lagefaktor.py PROJECT_NAME
+    python3 compensation.py --new PROJECT_NAME
     ```
+    where `PROJECT_NAME` is the name of the project. This will create a new directory structure for the project.
+    You can then copy the input shape files into the appropriate directories and run the script again without the `--new` flag.
 
-    where `PROJECT_NAME` is the name of the project. The script will look for the input shape files in the `DATA/PROJECT_NAME` directory and write the output shape files to the `DATA/PROJECT_NAME/output` directory. If any of the input directories are missing, the script will create them. PROJECT_NAME has to exist, however. All you need to do is to put the input shape files in the correct directories and PROJECT_NAME after you run the script for the first time. Add the shape files to the correct directories and run the script again.
-
-    Again, the steps are:
-    1. Create a directory `DATA/PROJECT_NAME`
-    2. Run the script with `PROJECT_NAME` as the argument
-    3. Add the input shape files to the correct directories
-    4. Run the script again
-
-## Input shape files
+    ```bash
+    python3 compensation.py
+    ```
 
 ### Directory structure
 
@@ -37,6 +35,8 @@ DATA/Project Name
 +-- output
 |
 +-- debug
+
+## Input shape files
 
 ### changing
 
