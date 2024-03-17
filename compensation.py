@@ -153,8 +153,8 @@ def pt(df, table_name=None):
     # get the name of the calling function
     fn_name = sys._getframe(1).f_code.co_name
 
-    max_length = df.drop(columns='geometry').applymap(
-        lambda x: len(str(x))).max().max()
+    max_length = df.drop(columns='geometry').apply(
+        lambda x: x.map(lambda y: len(str(y)))).max().max()
 
     fixed_width_df = df.drop(columns='geometry').apply(
         lambda x: x.astype(str).apply(lambda y: unicodedata.normalize('NFC', y)[:max_length].ljust(max_length, ' ')))
@@ -744,6 +744,7 @@ def save_features_to_file(features, filename):
 
 
 def calculate_value(row, current_features):
+    pt(current_features, 'current_features')
     if row.geometry.area >= 2000:
         print('Calculating value for area >= 2000')
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
@@ -768,6 +769,7 @@ def check_and_warn_column_length(df, limit):
         if len(df[column_name]) > limit:
             print(
                 f"Warning: The length of column '{column_name}' exceeds the limit of {limit}.")
+
 
 # ----> Main Logic Flow <----
 
