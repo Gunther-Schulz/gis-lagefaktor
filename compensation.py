@@ -275,7 +275,7 @@ def get_features(dir):
 
     features = [read_shapefile(shapefile) for shapefile in shapefiles]
     features_gdf = pd.concat(features, ignore_index=True)
-    features_gdf.set_crs(CRS, inplace=True)
+    features_gdf = features_gdf.to_crs(CRS)
 
     return features_gdf
 
@@ -792,6 +792,8 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
 
 
 # ---> Construction Output Shapefile Creation <---
+
+print()
 construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
 
@@ -810,14 +812,18 @@ write_output_json(total_construction_score, construction_feature_buffer_zones,
                   'Construction')
 
 # ---> Compensatory Output Shapefile Creation <---
+
 compensatory_features = add_compensatory_score(compensatory_features, scope)
+
 total_compensatory_score = round(compensatory_features['score'].sum(), 2)
 print(colored(
     f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
+
 for file in compensatory_features['s_name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['s_name'] == file])
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Compensatory_' + file)
+
 write_output_json(total_compensatory_score,
                   compensatory_features, 'Compensatory')
