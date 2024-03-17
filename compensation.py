@@ -252,20 +252,20 @@ def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=25
 
 
 def read_shapefile(file_path):
+    s_name = os.path.basename(os.path.dirname(file_path))
+    encoded_s_name = normalize_string(s_name)
     print(colored(
-        f"Reading shapefile {os.path.basename(file_path)}", 'yellow', attrs=['dark']))
+        f"  {encoded_s_name}/{os.path.basename(file_path)}", 'yellow', attrs=['dark']))
     feature = gpd.read_file(file_path)
     feature = feature.to_crs(CRS)
     feature = feature[['geometry']]
-    s_name = os.path.basename(os.path.dirname(file_path))
-    encoded_s_name = normalize_string(s_name)
     feature['s_name'] = encoded_s_name
     return feature
 
 
 def get_features(dir):
-    print(
-        colored(f"Reading shapefiles from directory {dir}", 'yellow', attrs=['dark']))
+    print(colored(
+        f'Reading shapefiles from directory "{os.path.basename(dir)}":', 'yellow', attrs=['dark']))
     shapefiles = glob.glob(f"{dir}/*/*.shp")
 
     if not shapefiles:
@@ -548,7 +548,8 @@ def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
             columns={'s_name': new_column_name})
 
         # Print old and new column name in one line
-        print(f"During overlap operation: {sort_by} -> {new_column_name}")
+        print(
+            f"During overlap operation, renaming: {sort_by} -> {new_column_name}")
 
         overlapping_areas = gpd.overlay(
             base_feature, cover_features, how='intersection')
