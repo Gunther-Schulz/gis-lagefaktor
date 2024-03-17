@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from termcolor import colored
+import unicodedata
 import sys
 import shutil
 import os
@@ -146,11 +148,59 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
 warnings.showwarning = custom_warning
 
 
+def pt(df, table_name=None):
+
+    # get the name of the calling function
+    fn_name = sys._getframe(1).f_code.co_name
+
+    max_length = df.drop(columns='geometry').applymap(
+        lambda x: len(str(x))).max().max()
+
+    fixed_width_df = df.drop(columns='geometry').apply(
+        lambda x: x.astype(str).apply(lambda y: unicodedata.normalize('NFC', y)[:max_length].ljust(max_length, ' ')))
+
+    # Define the colors to use
+    colors = ['\033[38;5;95m', '\033[38;5;130m', '\033[38;5;140m', '\033[38;5;105m', '\033[38;5;124m', '\033[38;5;160m', '\033[38;5;196m', '\033[38;5;202m', '\033[38;5;208m', '\033[38;5;214m', '\033[38;5;220m', '\033[38;5;226m', '\033[38;5;190m',
+              '\033[38;5;154m', '\033[38;5;118m', '\033[38;5;82m', '\033[38;5;46m', '\033[38;5;47m', '\033[38;5;48m', '\033[38;5;49m', '\033[38;5;50m', '\033[38;5;51m', '\033[38;5;45m', '\033[38;5;39m', '\033[38;5;33m', '\033[38;5;27m', '\033[38;5;21m', '\033[0m']
+
+    print()
+    if fn_name:
+        print(colored(fn_name, 'green'))
+    print(colored(table_name, 'red'))  # prints table name in red
+
+    # Print the column names with fixed width
+    for i, name in enumerate(fixed_width_df.columns):
+        print(colors[i % len(colors)] +
+              name.ljust(max_length + 1, ' '), end='')
+
+    print('\033[0m')  # Reset color
+
+    # Print a line of dashes
+    print('-' * (max_length + 1) * len(fixed_width_df.columns))
+
+    # Print each row with fixed width columns
+    for index, row in fixed_width_df.iterrows():
+        for i, value in enumerate(row):
+            print(colors[i % len(colors)] + value, end=' ')
+        print('\033[0m')  # Reset color after each row
+
+    print()
+
+
 def get_value_with_warning(values, key):
-    if key not in values:
-        print(f"Warning: Value for {key} does not exist.")
+    normalized_key = unicodedata.normalize('NFC', key)
+    normalized_values = {unicodedata.normalize(
+        'NFC', k): v for k, v in values.items()}
+    if normalized_key not in normalized_values:
+        print(f"Warning: Value for {normalized_key} does not exist.")
         return None  # or return a default value
-    return values[key]
+    value = normalized_values[normalized_key]
+    if isinstance(value, str):
+        normalized_value = unicodedata.normalize(
+            'NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        return normalized_value
+    else:
+        return value
 
 # ----> Feature Retrieval and Initialization <----
 
@@ -160,7 +210,11 @@ def read_shapefile(file_path):
     feature = gpd.read_file(file_path)
     feature = feature.to_crs(CRS)
     feature = feature[['geometry']]
-    feature['s_name'] = os.path.basename(os.path.dirname(file_path))
+    s_name = os.path.basename(os.path.dirname(file_path))
+    normalized_s_name = unicodedata.normalize('NFC', s_name)
+    encoded_s_name = normalized_s_name.encode(
+        'ISO-8859-1', 'replace').decode('ISO-8859-1')
+    feature['s_name'] = encoded_s_name
     return feature
 
 
@@ -354,6 +408,8 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     # Merge the base_features with the changing_features
     base_features['base_value'] = base_features['changing_f'].map(
         lambda x: get_value_with_warning(values, x))
+
+    pt(base_features, 'base_features')
 
     return base_features
 
