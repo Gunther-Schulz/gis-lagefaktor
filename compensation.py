@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import simplejson as sjson
 import inspect
 from termcolor import colored
 import unicodedata
@@ -105,14 +106,14 @@ COMPENSATORY_MEASURE_VALUES = {
 COMPENSATORY_PROTECTED_VALUES = {
     'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
 
-output_data = {
-    'construction': [
+# output_data = {
+#     'construction': [
 
-    ],
-    'compensatory': [
+#     ],
+#     'compensatory': [
 
-    ]
-}
+#     ]
+# }
 
 # Global variable to keep track of the context
 context = None
@@ -757,11 +758,11 @@ def add_compensatory_score(features, scope):
     return all_features
 
 
-def write_attribute_data(features, feature_type):
-    column_names = [col for col in features.columns if col != 'geometry']
-    for _, row in features.iterrows():
-        attribute_data = [(column, row[column]) for column in column_names]
-        output_data[feature_type].append(attribute_data)
+# def write_attribute_data(features, feature_type):
+#     column_names = [col for col in features.columns if col != 'geometry']
+#     for _, row in features.iterrows():
+#         attribute_data = [(column, row[column]) for column in column_names]
+#         output_data[feature_type].append(attribute_data)
 
 
 def save_features_to_file(features, filename):
@@ -791,6 +792,21 @@ def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=25
             if too_long.any():
                 warnings.warn(
                     f"Warning: Some values in column '{column_name}' exceed the limit of {value_length_limit}.")
+
+
+def write_output_json(data, filename='output'):
+    data = data.copy()
+    data['area'] = data.geometry.area.round(2)
+    data = data.drop(columns='geometry')
+
+    output_dict = {}
+    for name, group in data.groupby('s_name'):
+        output_dict[name] = group.to_dict('records')
+
+    with open(os.path.join(OUTPUT_DIR, filename + '.json'), 'w') as file:
+        sjson.dump(output_dict, file, ignore_nan=True,
+                   ensure_ascii=False, indent=4)
+
 
 # ----> Main Logic Flow <----
 
@@ -829,8 +845,8 @@ for file in construction_feature_buffer_zones['s_name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
     check_and_warn_column_length(current_features)
-    write_attribute_data(current_features, 'construction')
     save_features_to_file(current_features, 'Construction_' + file)
+write_output_json(construction_feature_buffer_zones, 'Construction')
 
 # ---> Compensatory Output Shapefile Creation <---
 compensatory_features = add_compensatory_score(compensatory_features, scope)
@@ -841,5 +857,5 @@ for file in compensatory_features['s_name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['s_name'] == file])
     check_and_warn_column_length(current_features)
-    write_attribute_data(current_features, 'compensatory')
     save_features_to_file(current_features, 'Compensatory_' + file)
+write_output_json(compensatory_features, 'Compensatory')
