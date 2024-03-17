@@ -106,19 +106,6 @@ COMPENSATORY_MEASURE_VALUES = {
 COMPENSATORY_PROTECTED_VALUES = {
     'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
 
-# output_data = {
-#     'construction': [
-
-#     ],
-#     'compensatory': [
-
-#     ]
-# }
-
-# Global variable to keep track of the context
-context = None
-# ----> Utility Functions <----
-
 
 def get_calling_function_name():
     """
@@ -238,6 +225,29 @@ def get_value_with_warning(values, key):
     value = normalized_values[normalized_key]
     return value
 
+
+def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=255):
+    """
+    Check the length of all column names and string values in a DataFrame and issue a warning if any exceeds their respective limits.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame to check.
+        column_name_limit (int): The maximum allowed length for column names.
+        value_length_limit (int): The maximum allowed length for string values.
+    """
+    for column_name in df.columns:
+        # Check length of column name
+        if len(column_name) > column_name_limit:
+            warnings.warn(
+                f"Warning: The length of column name '{column_name}' exceeds the limit of {column_name_limit}.")
+
+        # Check length of string values in the column
+        if df[column_name].dtype == 'object':
+            too_long = df[column_name].astype(
+                str).apply(len) > value_length_limit
+            if too_long.any():
+                warnings.warn(
+                    f"Warning: Some values in column '{column_name}' exceed the limit of {value_length_limit}.")
 # ----> Feature Retrieval and Initialization <----
 
 
@@ -421,7 +431,7 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
 
     # Rename 's_name' column in changing_features
     changing_features = changing_features.rename(
-        columns={'s_name': 'changing_f'})
+        columns={'s_name': 'changing_n'})
 
     # Punch holes
     changing_features = gpd.overlay(
@@ -431,9 +441,9 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     intersected_features = gpd.overlay(
         base_features, changing_features, how='intersection')
 
-    # Select only the columns from base_features and add 'changing_f'
+    # Select only the columns from base_features and add 'changing_n'
     intersected_features = intersected_features[base_features.columns]
-    intersected_features['changing_f'] = changing_features['changing_f']
+    intersected_features['changing_n'] = changing_features['changing_n']
 
     # Flatten the result into a single geometry and keep the first unique value for each group
     base_features = intersected_features.dissolve(
@@ -443,13 +453,13 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     base_features.reset_index(drop=False, inplace=True)
 
     # Merge the base_features with the changing_features
-    base_features['base_value'] = base_features['changing_f'].map(
+    base_features['base_value'] = base_features['changing_n'].map(
         lambda x: get_value_with_warning(values, x))
 
     return base_features
 
 
-def calculate_overlay(feature1, feature2, operation, context, file_base_name):
+def calculate_overlay(feature1, feature2, operation):
     """
     Calculate the geometric overlay between two features.
 
@@ -457,26 +467,11 @@ def calculate_overlay(feature1, feature2, operation, context, file_base_name):
     - feature1: The first GeoDataFrame.
     - feature2: The second GeoDataFrame.
     - operation: A string specifying the overlay operation ('intersection' or 'difference').
-    - context: The context in which this function is called. (Unused in this refactored version)
-    - file_base_name: The base name for any output files. (Unused in this refactored version)
 
     Returns:
     - A GeoDataFrame resulting from the specified overlay operation between feature1 and feature2.
     """
     return gpd.overlay(feature1, feature2, how=operation)
-
-
-def calculate_area(changing_feature):
-    """
-    Calculate the total area of all geometries in a GeoDataFrame.
-
-    Parameters:
-    - changing_feature: A GeoDataFrame whose total area is to be calculated.
-
-    Returns:
-    - The sum of the areas of all geometries in the GeoDataFrame.
-    """
-    return changing_feature.area.sum()
 
 
 def filter_features(scope, features):
@@ -547,8 +542,13 @@ def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
         cover_features = cover_features.sort_values(
             by=sort_by, ascending=False)
         cover_features = resolve_overlaps(cover_features)
+
+        new_column_name = f'{sort_by[:8]}_t'
         cover_features = cover_features.rename(
-            columns={'s_name': f'{sort_by[:8]}_f'})
+            columns={'s_name': new_column_name})
+
+        # Print old and new column name in one line
+        print(f"During overlap operation: {sort_by} -> {new_column_name}")
 
         overlapping_areas = gpd.overlay(
             base_feature, cover_features, how='intersection')
@@ -591,18 +591,23 @@ def consolidate_columns(feature):
                                                    ].combine_first(feature[matching_column])
         feature = feature.drop(columns=matching_columns[1:])
         base_name = matching_columns[0].rsplit('_', 1)[0]
-        feature = feature.rename(columns={matching_columns[0]: base_name})
+        old_column_name = matching_columns[0]
+        feature = feature.rename(columns={old_column_name: base_name})
+
+        # # Print old and new column name
+        # print(f"While consolidating columns: {old_column_name} -> {base_name}")
+
     return feature
 
 # ----> Feature Separation and Finalization <----
 
 
-def calculate_intersection_area(construction_feature, buffer, buffer_distance, protected_area_features, file_name, scope):
+def calculate_intersection_area(construction_feature, buffer, buffer_distance, protected_area_features, scope):
     """
     Calculate the intersection area of construction features with a buffer and process overlaps.
     """
     intersection = calculate_overlay(
-        construction_feature, buffer, 'intersection', f'intersects with Buffer {buffer_distance}', file_name)
+        construction_feature, buffer, 'intersection')
     intersection = process_geodataframe_overlaps(
         intersection, protected_area_features, 'protected')
     intersection = add_lagefaktor_values(
@@ -620,19 +625,18 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
 
     # Calculate intersections for each buffer zone
     changing_feature_B1_intersection = calculate_intersection_area(
-        construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, file_name, scope)
+        construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
 
     changing_feature_B2_intersection = calculate_intersection_area(
-        construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, file_name, scope)
+        construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, scope)
 
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
     changing_feature_B2_not_B1 = calculate_overlay(
-        changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference',
-        'intersects with Buffer >100 <625 but not Buffer <100', file_name)
+        changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference')
 
     # Calculate area outside B2 by taking the difference between the construction feature and buffer B2
     changing_feature_outside_B2 = calculate_overlay(
-        construction_feature, buffers[1], 'difference', 'outside Buffer >625', file_name)
+        construction_feature, buffers[1], 'difference')
     changing_feature_outside_B2 = process_geodataframe_overlaps(
         changing_feature_outside_B2, protected_area_features, 'protected')
     changing_feature_outside_B2 = add_lagefaktor_values(
@@ -640,18 +644,6 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     changing_feature_outside_B2 = filter_features(
         scope, changing_feature_outside_B2)
     changing_feature_outside_B2['buffer_dis'] = BUFFER_DISTANCES['>625']
-
-    # Calculate area for each feature
-    changing_feature_outside_B2_area = calculate_area(
-        changing_feature_outside_B2)
-    changing_feature_B2_not_B1_area = calculate_area(
-        changing_feature_B2_not_B1)
-    changing_feature_B1_intersection_area = calculate_area(
-        changing_feature_B1_intersection)
-
-    # # Print the results
-    # print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
-    #               changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
 
     features = pd.concat([changing_feature_B1_intersection, changing_feature_B2_not_B1,
                           changing_feature_outside_B2], ignore_index=True)
@@ -715,15 +707,6 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
 # ----> Output Shapefile Creation <----
 
 
-# def print_results(file_base_name, buffer_distances, changing_feature_B1_area, changing_feature_B2_not_B1_area, changing_feature_outside_B2_area):
-#     buffer_keys = list(buffer_distances.keys())
-#     print(
-#         f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[0]}: {round(changing_feature_B1_area)}")
-#     print(
-#         f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[1]} but not {buffer_keys[0]}: {round(changing_feature_B2_not_B1_area)}")
-#     print(
-#         f"Area of changing feature {file_base_name} outside Buffer {buffer_keys[1]}: {round(changing_feature_outside_B2_area)}")
-
 def process_features(directory, feature_type, unchanged_features, changing_features, changing_values):
     features = get_features(directory)
     features = preprocess_features(features, feature_type)
@@ -736,10 +719,10 @@ def calculate_compensatory_score(row, current_features):
 
     if row['eligible'] == True:
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
-        if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
+        if 'protected' in current_features.columns and pd.notnull(row['protecte_t']):
             final_v = final_v * \
                 get_value_with_warning(
-                    COMPENSATORY_PROTECTED_VALUES, row['protecte_f'])
+                    COMPENSATORY_PROTECTED_VALUES, row['protecte_t'])
         return final_v
     else:
         return 0
@@ -750,19 +733,10 @@ def add_compensatory_score(features, scope):
     for file in features['s_name'].unique():
         current_features = filter_features(
             scope, features[features['s_name'] == file])
-        current_features['score'] = current_features.apply(
-            lambda row: calculate_compensatory_score(row, current_features), axis=1)
+        current_features['score'] = round(current_features.apply(
+            lambda row: calculate_compensatory_score(row, current_features), axis=1), 2)
         all_features = pd.concat([all_features, current_features])
-        # write_attribute_data(current_features, 'compensatory')
-        # save_features_to_file(current_features, 'Compensatory_' + file)
     return all_features
-
-
-# def write_attribute_data(features, feature_type):
-#     column_names = [col for col in features.columns if col != 'geometry']
-#     for _, row in features.iterrows():
-#         attribute_data = [(column, row[column]) for column in column_names]
-#         output_data[feature_type].append(attribute_data)
 
 
 def save_features_to_file(features, filename):
@@ -770,31 +744,7 @@ def save_features_to_file(features, filename):
                      driver='ESRI Shapefile')
 
 
-def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=255):
-    """
-    Check the length of all column names and string values in a DataFrame and issue a warning if any exceeds their respective limits.
-
-    Args:
-        df (pandas.DataFrame): The DataFrame to check.
-        column_name_limit (int): The maximum allowed length for column names.
-        value_length_limit (int): The maximum allowed length for string values.
-    """
-    for column_name in df.columns:
-        # Check length of column name
-        if len(column_name) > column_name_limit:
-            warnings.warn(
-                f"Warning: The length of column name '{column_name}' exceeds the limit of {column_name_limit}.")
-
-        # Check length of string values in the column
-        if df[column_name].dtype == 'object':
-            too_long = df[column_name].astype(
-                str).apply(len) > value_length_limit
-            if too_long.any():
-                warnings.warn(
-                    f"Warning: Some values in column '{column_name}' exceed the limit of {value_length_limit}.")
-
-
-def write_output_json(data, filename='output'):
+def write_output_json(total_score, data, filename='output'):
     data = data.copy()
     data['area'] = data.geometry.area.round(2)
     data = data.drop(columns='geometry')
@@ -803,8 +753,13 @@ def write_output_json(data, filename='output'):
     for name, group in data.groupby('s_name'):
         output_dict[name] = group.to_dict('records')
 
+    # Create a new dictionary and add total_score to it first
+    final_output_dict = {'total_score': total_score}
+    # Update the new dictionary with output_dict
+    final_output_dict.update(output_dict)
+
     with open(os.path.join(OUTPUT_DIR, filename + '.json'), 'w') as file:
-        sjson.dump(output_dict, file, ignore_nan=True,
+        sjson.dump(final_output_dict, file, ignore_nan=True,
                    ensure_ascii=False, indent=4)
 
 
@@ -838,24 +793,30 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
 # ---> Construction Output Shapefile Creation <---
 construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
-total_construction_score = construction_feature_buffer_zones['score'].sum()
+
+total_construction_score = round(
+    construction_feature_buffer_zones['score'].sum(), 2)
 print(colored(
     f"Total Construction score: {total_construction_score}", 'yellow'))
+
 for file in construction_feature_buffer_zones['s_name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Construction_' + file)
-write_output_json(construction_feature_buffer_zones, 'Construction')
+
+write_output_json(total_construction_score, construction_feature_buffer_zones,
+                  'Construction')
 
 # ---> Compensatory Output Shapefile Creation <---
 compensatory_features = add_compensatory_score(compensatory_features, scope)
-total_compensatory_score = compensatory_features['score'].sum()
+total_compensatory_score = round(compensatory_features['score'].sum(), 2)
 print(colored(
-    f"Total Compensatory score: {round(total_compensatory_score, 2)}", 'yellow'))
+    f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
 for file in compensatory_features['s_name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['s_name'] == file])
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Compensatory_' + file)
-write_output_json(compensatory_features, 'Compensatory')
+write_output_json(total_compensatory_score,
+                  compensatory_features, 'Compensatory')
