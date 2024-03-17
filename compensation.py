@@ -187,20 +187,23 @@ def pt(df, table_name=None):
     print()
 
 
+def normalize_string(input_string):
+    normalized_string = unicodedata.normalize('NFC', input_string)
+    encoded_string = normalized_string.encode(
+        'ISO-8859-1', 'replace').decode('ISO-8859-1')
+    return encoded_string
+
+
 def get_value_with_warning(values, key):
-    normalized_key = unicodedata.normalize('NFC', key)
-    normalized_values = {unicodedata.normalize(
-        'NFC', k): v for k, v in values.items()}
+    normalized_key = normalize_string(key)
+    normalized_values = {normalize_string(k): v for k, v in values.items()}
+
     if normalized_key not in normalized_values:
         print(f"Warning: Value for {normalized_key} does not exist.")
         return None  # or return a default value
+
     value = normalized_values[normalized_key]
-    if isinstance(value, str):
-        normalized_value = unicodedata.normalize(
-            'NFKD', value).encode('ascii', 'ignore').decode('ascii')
-        return normalized_value
-    else:
-        return value
+    return value
 
 # ----> Feature Retrieval and Initialization <----
 
@@ -211,9 +214,7 @@ def read_shapefile(file_path):
     feature = feature.to_crs(CRS)
     feature = feature[['geometry']]
     s_name = os.path.basename(os.path.dirname(file_path))
-    normalized_s_name = unicodedata.normalize('NFC', s_name)
-    encoded_s_name = normalized_s_name.encode(
-        'ISO-8859-1', 'replace').decode('ISO-8859-1')
+    encoded_s_name = normalize_string(s_name)
     feature['s_name'] = encoded_s_name
     return feature
 
@@ -488,8 +489,8 @@ def add_compensatory_value(compensatory_features, protected_area_features):
     """
     Adds a 'compensat' column to compensatory_features based on 's_name' values.
     """
-    compensatory_features['compensat'] = compensatory_features['s_name'].map(
-        COMPENSATORY_MEASURE_VALUES)
+    compensatory_features['compensat'] = compensatory_features['s_name'].apply(
+        lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
@@ -711,7 +712,7 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     return features
 
 
-def calculate_and_sum_values(features, scope):
+def calculate_compensatory_score(features, scope):
     total = 0
     for file in features['s_name'].unique():
         current_features = filter_features(
@@ -742,7 +743,8 @@ def calculate_value(row, current_features):
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
         if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
             final_v = final_v * \
-                COMPENSATORY_PROTECTED_VALUES[row['protecte_f']]
+                get_value_with_warning(
+                    COMPENSATORY_PROTECTED_VALUES, row['protecte_f'])
         return final_v
     else:
         return 0
@@ -800,7 +802,7 @@ for lagefaktor_shape in output_shapes:
     create_lagefaktor_shapes(
         lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
 
-total = calculate_and_sum_values(compensatory_features, scope)
+total = calculate_compensatory_score(compensatory_features, scope)
 print(f"Total final value for compensatory features: {round(total, 2)}")
 # pp = pprint.PrettyPrinter(indent=4)
 # pp.pprint(output_data)
