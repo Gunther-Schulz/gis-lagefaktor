@@ -617,14 +617,17 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
                   changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
 
-    return [
-        {'shape': changing_feature_B1_intersection, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_DISTANCES['<100']},
-        {'shape': changing_feature_B2_not_B1, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_DISTANCES['>100<625']},
-        {'shape': changing_feature_outside_B2, 'file_base_name': file_name,
-            'buffer_distance': BUFFER_DISTANCES['>625']}
-    ]
+    features = pd.concat([changing_feature_B1_intersection, changing_feature_B2_not_B1,
+                          changing_feature_outside_B2], ignore_index=True)
+    return features
+    # return [
+    #     {'shape': changing_feature_B1_intersection, 'file_base_name': file_name,
+    #         'buffer_distance': BUFFER_DISTANCES['<100']},
+    #     {'shape': changing_feature_B2_not_B1, 'file_base_name': file_name,
+    #         'buffer_distance': BUFFER_DISTANCES['>100<625']},
+    #     {'shape': changing_feature_outside_B2, 'file_base_name': file_name,
+    #         'buffer_distance': BUFFER_DISTANCES['>625']}
+    # ]
 
 
 def calculate_total_value(features, grz):
@@ -636,17 +639,20 @@ def calculate_total_value(features, grz):
         grz (str): The GRZ factor.
 
     Returns:
-        float: The total final value, rounded to 2 decimal places.
+        DataFrame: The features DataFrame with an additional 'score' column.
     """
 
-    total_value = 0
+    scores = []
     for _, feature in features.iterrows():
         area = feature.geometry.area
-        total_value += feature['base_value'] * feature['lagefaktor'] * area
+        total_value = feature['base_value'] * feature['lagefaktor'] * area
+        factor_a, factor_b, factor_c = GRZ_FACTORS[grz]
+        total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
+        score = round(total_value_adjusted, 2)
+        scores.append(score)
 
-    factor_a, factor_b, factor_c = GRZ_FACTORS[grz]
-    total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
-    return round(total_value_adjusted, 2)
+    features['score'] = scores
+    return features
 
 
 def process_geometric_scope(scope, construction_features, compensatory_features, sliver_threshold=0.001):
@@ -717,9 +723,9 @@ def calculate_compensatory_score(features, scope):
     for file in features['s_name'].unique():
         current_features = filter_features(
             scope, features[features['s_name'] == file])
-        current_features['final_v'] = current_features.apply(
+        current_features['score'] = current_features.apply(
             lambda row: calculate_value(row, current_features), axis=1)
-        total += current_features['final_v'].sum()
+        total += current_features['score'].sum()
         write_attribute_data(current_features, 'compensatory')
         save_features_to_file(current_features, 'Compensatory_' + file)
     return total
@@ -786,22 +792,23 @@ protected_area_features = preprocess_features(
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
-output_shapes = process_and_separate_buffer_zones(
+construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
-combined_features = pd.concat([shape['shape'] for shape in output_shapes])
-total_final_value = calculate_total_value(combined_features, GRZ)
+
+construction_feature_buffer_zones = calculate_total_value(
+    construction_feature_buffer_zones, GRZ)
+pt(construction_feature_buffer_zones, 'combined_features')
+# sum up teh scores
+total_final_value = construction_feature_buffer_zones['score'].sum()
 print(f"Total final value: {total_final_value}")
 
-for lagefaktor_shape in output_shapes:
-    check_and_warn_column_length(
-        lagefaktor_shape['shape'], 10)
-    if lagefaktor_shape is output_shapes[-1]:
-        lagefaktor_shape['file_base_name'] += '_over'
-    write_attribute_data(lagefaktor_shape['shape'], 'construction')
-    create_lagefaktor_shapes(
-        lagefaktor_shape['shape'], lagefaktor_shape['file_base_name'], lagefaktor_shape['buffer_distance'])
-
+# save construction features grouped by s_name
+for file in construction_feature_buffer_zones['s_name'].unique():
+    current_features = filter_features(
+        scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
+    write_attribute_data(current_features, 'construction')
+    save_features_to_file(current_features, 'Construction_' + file)
 total = calculate_compensatory_score(compensatory_features, scope)
 print(f"Total final value for compensatory features: {round(total, 2)}")
 # pp = pprint.PrettyPrinter(indent=4)
