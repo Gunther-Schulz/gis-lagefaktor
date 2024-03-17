@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import inspect
 from termcolor import colored
 import unicodedata
 import sys
@@ -115,8 +116,45 @@ output_data = {
 
 # Global variable to keep track of the context
 context = None
-
 # ----> Utility Functions <----
+
+
+def get_calling_function_name():
+    """
+    Walk up the call stack and return the name of the first function found that is defined in the main script.
+    """
+    frame = inspect.currentframe()
+
+    # Skip the first two frames
+    frame = frame.f_back.f_back
+
+    while frame:
+        fn_module = inspect.getmodule(frame)
+        if fn_module is not None and fn_module.__name__ == "__main__":
+            return frame.f_code.co_name
+        frame = frame.f_back
+
+    # find teh line number where the function is called
+
+    return None
+
+
+def get_calling_line_number():
+    """
+    Walk up the call stack and return the line number of the first call found that is defined in the main script.
+    """
+    frame = inspect.currentframe()
+
+    # Skip the first two frames
+    frame = frame.f_back.f_back
+
+    while frame:
+        fn_module = inspect.getmodule(frame)
+        if fn_module is not None and fn_module.__name__ == "__main__":
+            return frame.f_lineno
+        frame = frame.f_back
+
+    return None
 
 
 def custom_warning(message, category, filename, lineno, file=None, line=None):
@@ -125,24 +163,17 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
     match_no_buffer = re.search(no_buffer_pattern, str(message))
     match_keepdims = re.search(keepdims_pattern, str(message))
 
+    # Get the name of the calling function
+    calling_fn_name = get_calling_function_name()
+    calling_fn_line = get_calling_line_number()
+
     if match_no_buffer:
-        if context == 'outside Buffer >625':
-            print(
-                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
-        elif context == 'intersects with Buffer >100 <625 but not Buffer <100':
-            print(
-                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
-        elif context == 'intersects with Buffer <100':
-            print(
-                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
-        elif context == 'intersects with Buffer >100 <625':
-            print(
-                'Custom Warning: The area of the feature is less than 0.1 and will be dropped')
-        else:
-            print('Custom Warning: ' + "During overlay operations, geometries such as lines or points that don't match the geometry type of the first DataFrame can be dropped.")
+        # print(colored('Warning:', 'red') + f' {calling_fn_name}, line {str(calling_fn_line)}: ' +
+        #       "During overlay operations, geometries such as lines or points that don't match the geometry type of the first DataFrame can be dropped.")
+        pass
     elif not match_keepdims:
-        # Only print the warning if it's not the 'keepdims' warning
-        print('Custom Warning: ' + str(message))
+        print(colored('Warning:', 'red') + f' {calling_fn_name}, line {str(calling_fn_line)}: ' +
+              str(message))
 
 
 warnings.showwarning = custom_warning
@@ -615,21 +646,13 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     changing_feature_B1_intersection_area = calculate_area(
         changing_feature_B1_intersection)
 
-    # Print the results
-    print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
-                  changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
+    # # Print the results
+    # print_results(file_name, BUFFER_DISTANCES, changing_feature_B1_intersection_area,
+    #               changing_feature_B2_not_B1_area, changing_feature_outside_B2_area)
 
     features = pd.concat([changing_feature_B1_intersection, changing_feature_B2_not_B1,
                           changing_feature_outside_B2], ignore_index=True)
     return features
-    # return [
-    #     {'shape': changing_feature_B1_intersection, 'file_base_name': file_name,
-    #         'buffer_distance': BUFFER_DISTANCES['<100']},
-    #     {'shape': changing_feature_B2_not_B1, 'file_base_name': file_name,
-    #         'buffer_distance': BUFFER_DISTANCES['>100<625']},
-    #     {'shape': changing_feature_outside_B2, 'file_base_name': file_name,
-    #         'buffer_distance': BUFFER_DISTANCES['>625']}
-    # ]
 
 
 def add_construction_score(features, grz):
@@ -689,28 +712,14 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
 # ----> Output Shapefile Creation <----
 
 
-def print_results(file_base_name, buffer_distances, changing_feature_B1_area, changing_feature_B2_not_B1_area, changing_feature_outside_B2_area):
-    buffer_keys = list(buffer_distances.keys())
-    print(
-        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[0]}: {round(changing_feature_B1_area)}")
-    print(
-        f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[1]} but not {buffer_keys[0]}: {round(changing_feature_B2_not_B1_area)}")
-    print(
-        f"Area of changing feature {file_base_name} outside Buffer {buffer_keys[1]}: {round(changing_feature_outside_B2_area)}")
-
-
-def create_lagefaktor_shapes(changing_features, file_base_name, buffer_distance):
-
-    # Set the file name
-    file_name = f'Construction_{file_base_name}_buffer_{buffer_distance}_intersection'
-
-    # Set the directory name to be the same as the file name
-    new_dir = f'{OUTPUT_DIR}/{file_name}'
-    os.makedirs(new_dir, exist_ok=True)
-
-    # Save the shape in the new directory
-    changing_features.to_file(f'{new_dir}/{file_name}.shp')
-
+# def print_results(file_base_name, buffer_distances, changing_feature_B1_area, changing_feature_B2_not_B1_area, changing_feature_outside_B2_area):
+#     buffer_keys = list(buffer_distances.keys())
+#     print(
+#         f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[0]}: {round(changing_feature_B1_area)}")
+#     print(
+#         f"Area of changing feature {file_base_name} intersecting with Buffer {buffer_keys[1]} but not {buffer_keys[0]}: {round(changing_feature_B2_not_B1_area)}")
+#     print(
+#         f"Area of changing feature {file_base_name} outside Buffer {buffer_keys[1]}: {round(changing_feature_outside_B2_area)}")
 
 def process_features(directory, feature_type, unchanged_features, changing_features, changing_values):
     features = get_features(directory)
@@ -720,13 +729,26 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     return features
 
 
+def calculate_compensatory_score(row, current_features):
+
+    if row['eligible'] == True:
+        final_v = (row['compensat'] - row['base_value']) * row.geometry.area
+        if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
+            final_v = final_v * \
+                get_value_with_warning(
+                    COMPENSATORY_PROTECTED_VALUES, row['protecte_f'])
+        return final_v
+    else:
+        return 0
+
+
 def add_compensatory_score(features, scope):
     all_features = pd.DataFrame()
     for file in features['s_name'].unique():
         current_features = filter_features(
             scope, features[features['s_name'] == file])
         current_features['score'] = current_features.apply(
-            lambda row: calculate_value(row, current_features), axis=1)
+            lambda row: calculate_compensatory_score(row, current_features), axis=1)
         all_features = pd.concat([all_features, current_features])
         # write_attribute_data(current_features, 'compensatory')
         # save_features_to_file(current_features, 'Compensatory_' + file)
@@ -745,32 +767,28 @@ def save_features_to_file(features, filename):
                      driver='ESRI Shapefile')
 
 
-def calculate_value(row, current_features):
-
-    if row['eligible'] == True:
-        final_v = (row['compensat'] - row['base_value']) * row.geometry.area
-        if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
-            final_v = final_v * \
-                get_value_with_warning(
-                    COMPENSATORY_PROTECTED_VALUES, row['protecte_f'])
-        return final_v
-    else:
-        return 0
-
-
-def check_and_warn_column_length(df, limit):
+def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=255):
     """
-    Check the length of all columns in a DataFrame and issue a warning if any exceeds a limit.
+    Check the length of all column names and string values in a DataFrame and issue a warning if any exceeds their respective limits.
 
     Args:
         df (pandas.DataFrame): The DataFrame to check.
-        limit (int): The maximum allowed length.
+        column_name_limit (int): The maximum allowed length for column names.
+        value_length_limit (int): The maximum allowed length for string values.
     """
     for column_name in df.columns:
-        if len(df[column_name]) > limit:
-            print(
-                f"Warning: The length of column '{column_name}' exceeds the limit of {limit}.")
+        # Check length of column name
+        if len(column_name) > column_name_limit:
+            warnings.warn(
+                f"Warning: The length of column name '{column_name}' exceeds the limit of {column_name_limit}.")
 
+        # Check length of string values in the column
+        if df[column_name].dtype == 'object':
+            too_long = df[column_name].astype(
+                str).apply(len) > value_length_limit
+            if too_long.any():
+                warnings.warn(
+                    f"Warning: Some values in column '{column_name}' exceed the limit of {value_length_limit}.")
 
 # ----> Main Logic Flow <----
 
@@ -807,6 +825,7 @@ print(f"Total final value: {total_construction_score}")
 for file in construction_feature_buffer_zones['s_name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
+    check_and_warn_column_length(current_features)
     write_attribute_data(current_features, 'construction')
     save_features_to_file(current_features, 'Construction_' + file)
 
@@ -819,5 +838,6 @@ print(
 for file in compensatory_features['s_name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['s_name'] == file])
+    check_and_warn_column_length(current_features)
     write_attribute_data(current_features, 'compensatory')
     save_features_to_file(current_features, 'Compensatory_' + file)
