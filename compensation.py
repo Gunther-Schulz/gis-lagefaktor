@@ -241,7 +241,8 @@ def get_value_with_warning(values, key):
 
 
 def read_shapefile(file_path):
-    print(f"Reading shapefile {os.path.basename(file_path)}")
+    print(colored(
+        f"Reading shapefile {os.path.basename(file_path)}", 'yellow', attrs=['dark']))
     feature = gpd.read_file(file_path)
     feature = feature.to_crs(CRS)
     feature = feature[['geometry']]
@@ -252,11 +253,13 @@ def read_shapefile(file_path):
 
 
 def get_features(dir):
-    print(f"Reading shapefiles from directory {dir}")
+    print(
+        colored(f"Reading shapefiles from directory {dir}", 'yellow', attrs=['dark']))
     shapefiles = glob.glob(f"{dir}/*/*.shp")
 
     if not shapefiles:
-        print(f"No shapefiles found in directory {dir}")
+        print(
+            colored(f"No shapefiles found in directory {dir}", 'yellow', attrs=['dark']))
         return gpd.GeoDataFrame(columns=['geometry', 's_name'], crs=CRS)
 
     features = [read_shapefile(shapefile) for shapefile in shapefiles]
@@ -540,7 +543,6 @@ def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
     Processes base_feature and cover_features GeoDataFrames to handle overlaps and differences.
     """
     if not cover_features.empty:
-        print('Processing cover features')
         cover_features = cover_features.sort_values(
             by=sort_by, ascending=False)
         cover_features = resolve_overlaps(cover_features)
@@ -821,7 +823,8 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
 construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
 total_construction_score = construction_feature_buffer_zones['score'].sum()
-print(f"Total final value: {total_construction_score}")
+print(colored(
+    f"Total Construction score: {total_construction_score}", 'yellow'))
 for file in construction_feature_buffer_zones['s_name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
@@ -830,11 +833,10 @@ for file in construction_feature_buffer_zones['s_name'].unique():
     save_features_to_file(current_features, 'Construction_' + file)
 
 # ---> Compensatory Output Shapefile Creation <---
-compensatory_features = add_compensatory_score(
-    compensatory_features, scope)
+compensatory_features = add_compensatory_score(compensatory_features, scope)
 total_compensatory_score = compensatory_features['score'].sum()
-print(
-    f"Total final value for compensatory features: {round(total_compensatory_score, 2)}")
+print(colored(
+    f"Total Compensatory score: {round(total_compensatory_score, 2)}", 'yellow'))
 for file in compensatory_features['s_name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['s_name'] == file])
