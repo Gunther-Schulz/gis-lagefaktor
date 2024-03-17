@@ -165,8 +165,9 @@ def pt(df, table_name=None):
 
     print()
     if fn_name:
-        print(colored(fn_name, 'green'))
-    print(colored(table_name, 'red'))  # prints table name in red
+        print(colored(f'Calling Fn: {fn_name}', 'green'))
+    # prints table name in red
+    print(colored(f'Table Name: {table_name}', 'red'))
 
     # Print the column names with fixed width
     for i, name in enumerate(fixed_width_df.columns):
@@ -410,8 +411,6 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     base_features['base_value'] = base_features['changing_f'].map(
         lambda x: get_value_with_warning(values, x))
 
-    pt(base_features, 'base_features')
-
     return base_features
 
 
@@ -457,7 +456,6 @@ def filter_features(scope, features):
     - A GeoDataFrame containing features that are within or overlap the scope and have an area greater than 0.
     """
     if not scope.empty:
-        print('Filtering features')
         # Filter features based on spatial relationship and area
         features = features[
             (features.geometry.within(scope.geometry.unary_union) |
@@ -487,10 +485,14 @@ def add_lagefaktor_values(feature, lagefaktor_value):
 
 def add_compensatory_value(compensatory_features, protected_area_features):
     """
-    Adds a 'compensat' column to compensatory_features based on 's_name' values.
+    Adds a 'compensat' and 'eligible' column to compensatory_features based on 's_name' values.
     """
     compensatory_features['compensat'] = compensatory_features['s_name'].apply(
         lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
+
+    # Add 'eligible' column
+    compensatory_features['eligible'] = compensatory_features['geometry'].apply(
+        lambda x: x.area > 2000)
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
@@ -630,7 +632,7 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     # ]
 
 
-def calculate_total_value(features, grz):
+def add_construction_score(features, grz):
     """
     Calculate the total final value based on features and GRZ factors.
 
@@ -718,17 +720,17 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     return features
 
 
-def calculate_compensatory_score(features, scope):
-    total = 0
+def add_compensatory_score(features, scope):
+    all_features = pd.DataFrame()
     for file in features['s_name'].unique():
         current_features = filter_features(
             scope, features[features['s_name'] == file])
         current_features['score'] = current_features.apply(
             lambda row: calculate_value(row, current_features), axis=1)
-        total += current_features['score'].sum()
-        write_attribute_data(current_features, 'compensatory')
-        save_features_to_file(current_features, 'Compensatory_' + file)
-    return total
+        all_features = pd.concat([all_features, current_features])
+        # write_attribute_data(current_features, 'compensatory')
+        # save_features_to_file(current_features, 'Compensatory_' + file)
+    return all_features
 
 
 def write_attribute_data(features, feature_type):
@@ -744,9 +746,8 @@ def save_features_to_file(features, filename):
 
 
 def calculate_value(row, current_features):
-    pt(current_features, 'current_features')
-    if row.geometry.area >= 2000:
-        print('Calculating value for area >= 2000')
+
+    if row['eligible'] == True:
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
         if 'protected' in current_features.columns and pd.notnull(row['protecte_f']):
             final_v = final_v * \
@@ -798,20 +799,25 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
 
-construction_feature_buffer_zones = calculate_total_value(
+# ---> Construction Output Shapefile Creation <---
+construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
-pt(construction_feature_buffer_zones, 'combined_features')
-# sum up teh scores
-total_final_value = construction_feature_buffer_zones['score'].sum()
-print(f"Total final value: {total_final_value}")
-
-# save construction features grouped by s_name
+total_construction_score = construction_feature_buffer_zones['score'].sum()
+print(f"Total final value: {total_construction_score}")
 for file in construction_feature_buffer_zones['s_name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
     write_attribute_data(current_features, 'construction')
     save_features_to_file(current_features, 'Construction_' + file)
-total = calculate_compensatory_score(compensatory_features, scope)
-print(f"Total final value for compensatory features: {round(total, 2)}")
-# pp = pprint.PrettyPrinter(indent=4)
-# pp.pprint(output_data)
+
+# ---> Compensatory Output Shapefile Creation <---
+compensatory_features = add_compensatory_score(
+    compensatory_features, scope)
+total_compensatory_score = compensatory_features['score'].sum()
+print(
+    f"Total final value for compensatory features: {round(total_compensatory_score, 2)}")
+for file in compensatory_features['s_name'].unique():
+    current_features = filter_features(
+        scope, compensatory_features[compensatory_features['s_name'] == file])
+    write_attribute_data(current_features, 'compensatory')
+    save_features_to_file(current_features, 'Compensatory_' + file)

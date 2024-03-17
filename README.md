@@ -83,12 +83,12 @@ The debug directory contains debug shape files that are used to visualize the in
 Total final value: 196169.43
 Total final value for compensatory features: 278066.28
 
-### Vorbeck
-
-Total final value: 294992.93
-Total final value for compensatory features: 267277.98
-
 ### Friedrichshof
 
 Total final value: 160418.42
 Total final value for compensatory features: 31148.58
+
+### Vorbeck
+
+Total final value: 294992.93
+Total final value for compensatory features: 267277.98 (310305.83)
