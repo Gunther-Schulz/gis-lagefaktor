@@ -26,7 +26,7 @@ GRZ_FACTORS = {
 
 # Create the parser
 parser = argparse.ArgumentParser(
-    description='Calculate the final value of construction and compensatory features and create shapefiles for each feature.')
+    description='Calculate the final value of construction and compensatory features and create shapefiles for each feature and JSON output.')
 
 # Add the arguments
 parser.add_argument('project', metavar='project', type=str, nargs='?', default=None,
@@ -745,7 +745,7 @@ def save_features_to_file(features, filename):
                      driver='ESRI Shapefile')
 
 
-def write_output_json(total_score, data, filename='output'):
+def write_output_json_and_excel(total_score, data, filename='output'):
     data = data.copy()
     data['area'] = data.geometry.area.round(2)
     data = data.drop(columns='geometry')
@@ -762,6 +762,15 @@ def write_output_json(total_score, data, filename='output'):
     with open(os.path.join(OUTPUT_DIR, filename + '.json'), 'w') as file:
         sjson.dump(final_output_dict, file, ignore_nan=True,
                    ensure_ascii=False, indent=4)
+
+    # Convert the data to a DataFrame and write it to an Excel file
+    df = pd.DataFrame(data)
+
+    # Append total_score to the bottom of the DataFrame using pd.concat
+    df = pd.concat(
+        [df, pd.DataFrame({'total_score': [total_score]})], ignore_index=True)
+
+    df.to_excel(os.path.join(OUTPUT_DIR, filename + '.xlsx'), index=False)
 
 
 # ----> Main Logic Flow <----
@@ -808,8 +817,8 @@ for file in construction_feature_buffer_zones['s_name'].unique():
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Construction_' + file)
 
-write_output_json(total_construction_score, construction_feature_buffer_zones,
-                  'Construction')
+write_output_json_and_excel(total_construction_score, construction_feature_buffer_zones,
+                            'Construction')
 
 # ---> Compensatory Output Shapefile Creation <---
 
@@ -825,5 +834,5 @@ for file in compensatory_features['s_name'].unique():
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Compensatory_' + file)
 
-write_output_json(total_compensatory_score,
-                  compensatory_features, 'Compensatory')
+write_output_json_and_excel(total_compensatory_score,
+                            compensatory_features, 'Compensatory')

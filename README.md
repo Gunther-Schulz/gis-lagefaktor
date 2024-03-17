@@ -91,4 +91,5 @@ Total final value for compensatory features: 31148.58
 ### Vorbeck
 
 Total final value: 294992.93
-Total final value for compensatory features: 267277.98 (310305.83)
+Total final value for compensatory features: 310305.83
+(The old compensatory value was: 267277.98. I am guessing that only the large compensatory area was used for the old value)
