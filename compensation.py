@@ -211,11 +211,15 @@ def debug(gdf, prefix='', include_stack=True):
         debug_counter_dict[calling_function] = debug_counter_dict.get(
             calling_function, 0) + 1
 
+        # Increment the absolute counter for the debug function
+        debug_counter_dict['debug'] = debug_counter_dict.get('debug', 0) + 1
+        print(debug_counter_dict['debug'])
+
         if prefix:
             prefix = '_' + prefix
         # Create the filename
         filename = os.path.join(
-            DEBUG_DIR, f"{calling_function}_{stack_line_numbers}-{line_number}{prefix}_#{debug_counter_dict[calling_function]}.shp")
+            DEBUG_DIR, f"{debug_counter_dict['debug']}_{calling_function}_{stack_line_numbers}-{line_number}{prefix}_#{debug_counter_dict[calling_function]}.shp")
 
         # Write the GeoDataFrame to a shapefile
         gdf.to_file(filename)
