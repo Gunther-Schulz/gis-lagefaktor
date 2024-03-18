@@ -7,11 +7,8 @@ Flächig umzusetzende Kompensationsmaßnahmen und Bauflächen werden in ihrer La
 - es gibt noch sliver bei construction in bäbelitz. i don't think it can be solved with remove_sliver. need to debug the intermediary shapes
 - do linear/point construction and compensatory work? Test it
 - test having different compensation and construction types in the same project
-- change it so that def get_buffers(features, distances) does not return a list
 
-- to excel add a legend for the short names or even better put the full names as header
-
-- merge all same lagefaktor ?
+## Info
 
 - Schutzgebietsaufschläge gelten nur für die Bereiche die im Schutzgebiet liegen, nicht für die gesamte Fläche.
   Die Restfläche kann dann unter der mndestgröße (2000 in Vorbeck) liegen. und fällt dann weg. Man könnte schauen was sich mehr lohn. DIe gesamte Fläche mit Aufschlag oder nur die Fläche im Schutzgebiet.
@@ -19,7 +16,7 @@ Flächig umzusetzende Kompensationsmaßnahmen und Bauflächen werden in ihrer La
 Hendrik:
 
 - schutzgebiet und interference area lagefakltoren beide oder nur einer? nur einer
-- vorbeck anschauen, mindestfläceh für kompensation im schutzgebiet? schutzgebiet ist nicht relevant für mindestfläche
+- mindestfläceh für kompensation im schutzgebiet? schutzgebiet ist nicht relevant für mindestfläche
 
 ## Usage
 

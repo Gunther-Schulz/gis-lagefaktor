@@ -240,16 +240,19 @@ def pt(df, table_name=None):
     # get the name of the calling function
     fn_name = sys._getframe(1).f_code.co_name
 
-    max_length = df.drop(columns='geometry').apply(
+    max_length_values = df.drop(columns='geometry').apply(
         lambda x: x.map(lambda y: len(str(y)))).max().max()
+
+    max_length_columns = max([len(col) for col in df.columns])
+
+    max_length = max(max_length_values, max_length_columns)
 
     fixed_width_df = df.drop(columns='geometry').apply(
         lambda x: x.astype(str).apply(lambda y: unicodedata.normalize('NFC', y)[:max_length].ljust(max_length, ' ')))
 
     # Define the colors to use
-    colors = ['\033[38;5;95m', '\033[38;5;130m', '\033[38;5;140m', '\033[38;5;105m', '\033[38;5;124m', '\033[38;5;160m', '\033[38;5;196m', '\033[38;5;202m', '\033[38;5;208m', '\033[38;5;214m', '\033[38;5;220m', '\033[38;5;226m', '\033[38;5;190m',
-              '\033[38;5;154m', '\033[38;5;118m', '\033[38;5;82m', '\033[38;5;46m', '\033[38;5;47m', '\033[38;5;48m', '\033[38;5;49m', '\033[38;5;50m', '\033[38;5;51m', '\033[38;5;45m', '\033[38;5;39m', '\033[38;5;33m', '\033[38;5;27m', '\033[38;5;21m', '\033[0m']
-
+    colors = ['\033[38;5;95m', '\033[38;5;160m', '\033[38;5;140m', '\033[38;5;202m', '\033[38;5;124m', '\033[38;5;214m', '\033[38;5;196m', '\033[38;5;105m', '\033[38;5;130m', '\033[38;5;220m', '\033[38;5;208m', '\033[38;5;154m', '\033[38;5;190m',
+              '\033[38;5;82m', '\033[38;5;226m', '\033[38;5;48m', '\033[38;5;46m', '\033[38;5;51m', '\033[38;5;47m', '\033[38;5;50m', '\033[38;5;45m', '\033[38;5;49m', '\033[38;5;39m', '\033[38;5;33m', '\033[38;5;27m', '\033[38;5;21m', '\033[0m']
     print()
     if fn_name:
         print(colored(f'Calling Fn: {fn_name}', 'green'))
@@ -1079,7 +1082,7 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
 # remove column prot_comp
 construction_feature_buffer_zones = construction_feature_buffer_zones.drop(
     columns='prot_comp')
-
+pt(construction_feature_buffer_zones)
 
 # ---> Construction Output Shapefile Creation <---
 
