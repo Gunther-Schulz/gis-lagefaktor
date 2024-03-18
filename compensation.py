@@ -158,7 +158,7 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
     file_path (str): The file path from which to read the shapefile.
 
     Returns:
-    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 's_name' column 
+    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 'name' column 
     representing the encoded name of the shapefile's parent directory.
     """
     no_buffer_pattern = r"`?keep_geom_type=True`? in overlay resulted in .* dropped geometries of .* than .*\. Set `?keep_geom_type=False`? to retain all geometries"
@@ -346,7 +346,7 @@ def read_shapefile(file_path):
     file_path (str): The file path from which to read the shapefile.
 
     Returns:
-    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 's_name' column 
+    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 'name' column 
     representing the encoded name of the shapefile's parent directory.
     """
     s_name = os.path.basename(os.path.dirname(file_path))
@@ -356,7 +356,7 @@ def read_shapefile(file_path):
     feature = gpd.read_file(file_path)
     feature = feature.to_crs(CRS)
     feature = feature[['geometry']]
-    feature['s_name'] = encoded_s_name
+    feature['name'] = encoded_s_name
     return feature
 
 
@@ -377,7 +377,7 @@ def get_features(dir):
     if not shapefiles:
         print(
             colored(f"No shapefiles found in directory {dir}", 'yellow', attrs=['dark']))
-        return gpd.GeoDataFrame(columns=['geometry', 's_name'], crs=CRS)
+        return gpd.GeoDataFrame(columns=['geometry', 'name'], crs=CRS)
 
     features = [read_shapefile(shapefile) for shapefile in shapefiles]
     features_gdf = pd.concat(features, ignore_index=True)
@@ -424,7 +424,7 @@ def get_buffers(features, distances):
 
 def cleanup_and_merge_features(feature, buffer_distance):
     """
-    Cleans up and merges features based on their geometry and 's_name'.
+    Cleans up and merges features based on their geometry and 'name'.
 
     Parameters:
     - feature: GeoDataFrame to be processed.
@@ -442,7 +442,7 @@ def cleanup_and_merge_features(feature, buffer_distance):
                .explode(index_parts=False)
                .assign(geometry=lambda x: x.geometry.buffer(-buffer_distance))
                .loc[lambda x: x.geometry.geom_type == 'Polygon']
-               .dissolve(by='s_name')
+               .dissolve(by='name')
                .reset_index())
 
     # Set the CRS
@@ -451,7 +451,7 @@ def cleanup_and_merge_features(feature, buffer_distance):
     # Merge with original string columns
     original_strings = original_strings.loc[feature.index].reset_index(
         drop=True)
-    original_strings.drop(columns='s_name', inplace=True)
+    original_strings.drop(columns='name', inplace=True)
     merged_features = pd.concat([feature, original_strings], axis=1)
 
     return merged_features
@@ -528,17 +528,17 @@ def preprocess_features(features, feature_type, buffer_distance=10):
         features, buffer_distance=buffer_distance)
 
     if feature_type == 'compensatory':
-        # Assign 'compensat' based on 's_name'
-        processed_features['compensat'] = processed_features['s_name'].map(
+        # Assign 'compensat' based on 'name'
+        processed_features['compensat'] = processed_features['name'].map(
             lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
     elif feature_type == 'protected_area':
-        # Set 'prot_cons' and 'prot_comp' based on 's_name'
-        processed_features['prot_cons'] = processed_features['s_name'].apply(
+        # Set 'prot_cons' and 'prot_comp' based on 'name'
+        processed_features['prot_cons'] = processed_features['name'].apply(
             lambda x: get_value_with_warning(CONSTRUCTION_PROTECTED_VALUES, x))
-        processed_features['prot_comp'] = processed_features['s_name'].apply(
+        processed_features['prot_comp'] = processed_features['name'].apply(
             lambda x: get_value_with_warning(COMPENSATORY_PROTECTED_VALUES, x))
         processed_features = processed_features.rename(
-            columns={'s_name': 'protect_t'})
+            columns={'name': 'prot_name'})
     return processed_features
 
 
@@ -559,9 +559,9 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     # # Assuming unchanged_features and changing_features are defined globally or passed as parameters
     # global unchanged_features, changing_features, values
 
-    # Rename 's_name' column in changing_features
+    # Rename 'name' column in changing_features
     changing_features = changing_features.rename(
-        columns={'s_name': 'changing_n'})
+        columns={'name': 'changing_n'})
 
     # Punch holes
     changing_features = gpd.overlay(
@@ -577,7 +577,7 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
 
     # Flatten the result into a single geometry and keep the first unique value for each group
     base_features = intersected_features.dissolve(
-        by='s_name', aggfunc='first').explode(index_parts=False)
+        by='name', aggfunc='first').explode(index_parts=False)
 
     # Reset the index
     base_features.reset_index(drop=False, inplace=True)
@@ -666,13 +666,13 @@ def add_compensatory_value(compensatory_features, protected_area_features):
     Returns:
     GeoDataFrame: The updated GeoDataFrame with compensatory values.
     """
-    compensatory_features['compensat'] = compensatory_features['s_name'].apply(
+    compensatory_features['compensat'] = compensatory_features['name'].apply(
         lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
 
     # Add 'eligible' column
     compensatory_features['eligible'] = compensatory_features.apply(
         lambda row: row['geometry'].area > get_value_with_warning(
-            COMPENSATORY_MEASURE_MINIMUM_AREAS, row['s_name']), axis=1)
+            COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
@@ -703,7 +703,7 @@ def process_geodataframe_overlaps(base_feature, cover_features):
 
         # new_column_name = f'{sort_by[:8]}_t'
         # cover_features = cover_features.rename(
-        #     columns={'s_name': new_column_name})
+        #     columns={'name': new_column_name})
 
         # Print old and new column name in one line
         # print(
@@ -941,7 +941,7 @@ def calculate_compensatory_score(row, current_features):
         if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
             final_v = final_v * \
                 get_value_with_warning(
-                    COMPENSATORY_PROTECTED_VALUES, row['protect_t'])
+                    COMPENSATORY_PROTECTED_VALUES, row['prot_name'])
         return final_v
     else:
         return 0
@@ -959,9 +959,9 @@ def add_compensatory_score(features, scope):
     GeoDataFrame: The features with added compensatory scores.
     """
     all_features = pd.DataFrame()
-    for file in features['s_name'].unique():
+    for file in features['name'].unique():
         current_features = filter_features(
-            scope, features[features['s_name'] == file])
+            scope, features[features['name'] == file])
         current_features['score'] = round(current_features.apply(
             lambda row: calculate_compensatory_score(row, current_features), axis=1), 2)
         all_features = pd.concat([all_features, current_features])
@@ -1000,7 +1000,7 @@ def write_output_json_and_excel(total_score, data, filename='output'):
     data = data.drop(columns='geometry')
 
     output_dict = {}
-    for name, group in data.groupby('s_name'):
+    for name, group in data.groupby('name'):
         output_dict[name] = group.to_dict('records')
 
     # Create a new dictionary and add total_score to it first
@@ -1061,9 +1061,9 @@ total_construction_score = round(
 print(colored(
     f"Total Construction score: {total_construction_score}", 'yellow'))
 
-for file in construction_feature_buffer_zones['s_name'].unique():
+for file in construction_feature_buffer_zones['name'].unique():
     current_features = filter_features(
-        scope, construction_feature_buffer_zones[construction_feature_buffer_zones['s_name'] == file])
+        scope, construction_feature_buffer_zones[construction_feature_buffer_zones['name'] == file])
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Construction_' + file)
 
@@ -1078,9 +1078,9 @@ total_compensatory_score = round(compensatory_features['score'].sum(), 2)
 print(colored(
     f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
 
-for file in compensatory_features['s_name'].unique():
+for file in compensatory_features['name'].unique():
     current_features = filter_features(
-        scope, compensatory_features[compensatory_features['s_name'] == file])
+        scope, compensatory_features[compensatory_features['name'] == file])
     check_and_warn_column_length(current_features)
     save_features_to_file(current_features, 'Compensatory_' + file)
 
