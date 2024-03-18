@@ -1,13 +1,19 @@
 # gis-lagefaktor
 
+Flächig umzusetzende Kompensationsmaßnahmen und Bauflächen werden in ihrer Lage und Größe bewertet. Die Bewertung erfolgt anhand von Lagefaktoren, die sich aus der Lage der Flächen zu Schutzgebieten und Interferenzflächen ergeben. Die Lagefaktoren werden in einem GIS berechnet und in einer Tabelle dargestellt.
+
 ## TODO
 
 -
 - es gibt noch sliver bei construction in bäbelitz. i don't think it can be solved with remove_sliver. need to debug the intermediary shapes
-- do linear contruction and compensatory work? Test it
+- do linear construction and compensatory work? Test it
 - change it so that def get_buffers(features, distances) does not rezrn a list
 - was bedeuten die area einschränkungen bei den schutzgebieten in der lagefaktor tabelle?
-- lagefaktor <100 ist falsch in bänbelitz (1) ????
+- lagefaktor <100 ist falsch in Bäbelitz (1) ????
+
+- Warum habe ich 'protected' (denb lagefaktor) auch bei compensationsflächen drin?
+- Schutzgebietsaufschläge gelten nur für die Bereiche die im Schutzgebiet liegen, nicht für die gesamte Fläche.
+  Die Restfläche kann dann unter der mndestgröße (2000 in Vorbeck) liegen. und fällt dann weg. Man könnte schauen was sich mehr lohn. DIe gesamte Fläche mit Aufschlag oder nur die Fläche im Schutzgebiet.
 
 Hendrik:
 

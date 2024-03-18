@@ -99,7 +99,7 @@ CHANGING_CONSTRUCTION_BASE_VALUES = {
 
 CONSTRUCTION_LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1, '>625': 1.25}
 CONSTRUCTION_PROTECTED_VALUES = {
-    'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.5, 'Test': 10, 'Test2': 20}
+    'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.25, 'Test': 10, 'Test2': 20}
 
 # TODO:
 CHANGING_COMPENSATORY_BASE_VALUES = {'Acker': 0, 'Grünland': 0, 'weg': 0}
@@ -182,14 +182,14 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
 warnings.showwarning = custom_warning
 
 
-def debug(gdf, prefix='', include_stack=True):
+def debug(gdf, prefix='', include_line_numbers=False):
     """
     This function writes a GeoDataFrame to a shapefile for debugging purposes.
 
     Parameters:
     gdf (GeoDataFrame): The GeoDataFrame to write.
     prefix (str, optional): An optional prefix to add to the filename.
-    include_stack (bool, optional): Whether to include the line numbers of the entire call stack in the filename.
+    include_line_numbers (bool, optional): Whether to include line numbers in the filename.
 
     Returns:
     None
@@ -198,14 +198,15 @@ def debug(gdf, prefix='', include_stack=True):
         # Get the name of the calling function and line number
         frame = inspect.stack()[1]
         calling_function = frame.function
+        if calling_function == '<module>':
+            calling_function = 'main'
         line_number = frame.lineno
 
+        # print length of stack
+        print(len(inspect.stack()))
         # Get the line numbers of the entire call stack
-        if include_stack:
-            stack_line_numbers = '-'.join(
-                str(frame.lineno) for frame in inspect.stack()[2:])
-        else:
-            stack_line_numbers = str(inspect.stack()[2].lineno)
+        stack_line_numbers = '-'.join(
+            str(frame.lineno) for frame in reversed(inspect.stack()[2:]))
 
         # Increment the counter for the calling function
         debug_counter_dict[calling_function] = debug_counter_dict.get(
@@ -213,13 +214,15 @@ def debug(gdf, prefix='', include_stack=True):
 
         # Increment the absolute counter for the debug function
         debug_counter_dict['debug'] = debug_counter_dict.get('debug', 0) + 1
-        print(debug_counter_dict['debug'])
 
         if prefix:
-            prefix = '_' + prefix
+            prefix = '--' + prefix
         # Create the filename
         filename = os.path.join(
-            DEBUG_DIR, f"{debug_counter_dict['debug']}_{calling_function}_{stack_line_numbers}-{line_number}{prefix}_#{debug_counter_dict[calling_function]}.shp")
+            DEBUG_DIR, f"{debug_counter_dict['debug']}_{calling_function}")
+        if include_line_numbers:
+            filename += f"-{stack_line_numbers}-{line_number}"
+        filename += f"{prefix}_#{debug_counter_dict[calling_function]}.shp"
 
         # Write the GeoDataFrame to a shapefile
         gdf.to_file(filename)
@@ -401,7 +404,6 @@ def create_buffer(linestrings, distance):
     # Create a buffer around each linestring and dissolve all geometries into a single one
     buffers = linestrings.buffer(distance).to_frame().rename(
         columns={0: 'geometry'}).set_geometry('geometry').dissolve()
-    debug(buffers)
     return buffers
 
 
@@ -597,7 +599,9 @@ def calculate_overlay(feature1, feature2, operation):
     Returns:
     - A GeoDataFrame resulting from the specified overlay operation between feature1 and feature2.
     """
-    return gpd.overlay(feature1, feature2, how=operation)
+    gdf = gpd.overlay(feature1, feature2, how=operation)
+    gdf = remove_slivers(gdf)
+    return gdf
 
 
 def filter_features(scope, features):
@@ -635,11 +639,14 @@ def add_lagefaktor_values(feature, lagefaktor_value):
     GeoDataFrame: The updated GeoDataFrame with 'lagefaktor' values.
     """
     if 'protected' in feature.columns:
+        # Check if 'protected' is not null for each polygon
+        is_protected_not_null = feature['protected'].notnull()
+
         feature['lagefaktor'] = feature['protected'].fillna(lagefaktor_value)
         if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
-            feature['lagefaktor'] -= 0.25
-
-        feature = dissolve_sort_and_resolve(feature, 'lagefaktor')
+            # Only subtract 0.27 from 'lagefaktor' for polygons where 'protected' is not null
+            feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
+            debug(feature, 'feature_with_lagefaktor')
     else:
         feature['lagefaktor'] = lagefaktor_value
 
@@ -806,13 +813,17 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     # Calculate intersections for each buffer zone
     changing_feature_B1_intersection = calculate_intersection_area(
         construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
+    debug(changing_feature_B1_intersection, 'changing_feature_B1_intersection')
 
+    # Calculate intersection for buffer B2
     changing_feature_B2_intersection = calculate_intersection_area(
         construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, scope)
+    debug(changing_feature_B2_intersection, 'changing_feature_B2_intersection')
 
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
     changing_feature_B2_not_B1 = calculate_overlay(
         changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference')
+    debug(changing_feature_B2_not_B1, 'changing_feature_B2_not_B1')
 
     # Calculate area outside B2 by taking the difference between the construction feature and buffer B2
     changing_feature_outside_B2 = calculate_overlay(
@@ -1029,8 +1040,10 @@ protected_area_features = preprocess_features(
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
+debug(construction_features, 'construction_features')
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
+debug(construction_feature_buffer_zones, 'construction_feature_buffer_zones')
 
 
 # ---> Construction Output Shapefile Creation <---
