@@ -108,7 +108,7 @@ COMPENSATORY_MEASURE_VALUES = {
 COMPENSATORY_MEASURE_MINIMUM_AREAS = {
     'Grünfläche': 2000, "comp_test": 100}
 COMPENSATORY_PROTECTED_VALUES = {
-    'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
+    'VSG': 1.1, 'GGB': 1.1, 'Test': 2, 'Test2': 4}
 
 # Global debug counter dictionary
 debug_counter_dict = {}
@@ -519,7 +519,7 @@ def preprocess_features(features, feature_type, buffer_distance=10):
 
     Parameters:
     - features: GeoDataFrame of features to be processed.
-    - feature_type: Type of features being processed ('compensatory', 'protected_area', or 'base').
+    - feature_type: Type of features being processed ('compensatory' or 'protected_area').
     - buffer_distance: Buffer distance for cleanup and merge operation, default is 10.
 
     Returns:
@@ -537,6 +537,7 @@ def preprocess_features(features, feature_type, buffer_distance=10):
         # Set 'protected' value based on 's_name'
         processed_features['protected'] = processed_features['s_name'].apply(
             lambda x: get_value_with_warning(CONSTRUCTION_PROTECTED_VALUES, x))
+        debug(processed_features, 'processed_features_protected')
     return processed_features
 
 
