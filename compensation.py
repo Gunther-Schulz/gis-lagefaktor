@@ -103,6 +103,8 @@ CONSTRUCTION_PROTECTED_VALUES = {
 CHANGING_COMPENSATORY_BASE_VALUES = {'Acker': 0, 'Grünland': 0, 'weg': 0}
 COMPENSATORY_MEASURE_VALUES = {
     'Grünfläche': 3, "comp_test": 10}
+COMPENSATORY_MEASURE_MINIMUM_AREAS = {
+    'Grünfläche': 2000, "comp_test": 100}
 COMPENSATORY_PROTECTED_VALUES = {
     'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
 
@@ -521,8 +523,9 @@ def add_compensatory_value(compensatory_features, protected_area_features):
         lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
 
     # Add 'eligible' column
-    compensatory_features['eligible'] = compensatory_features['geometry'].apply(
-        lambda x: x.area > 2000)
+    compensatory_features['eligible'] = compensatory_features.apply(
+        lambda row: row['geometry'].area > get_value_with_warning(
+            COMPENSATORY_MEASURE_MINIMUM_AREAS, row['s_name']), axis=1)
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
@@ -622,7 +625,6 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     """
     Separate features based on their intersection with different buffer zones and process them.
     """
-    file_name = construction_feature['s_name'].iloc[0]
 
     # Calculate intersections for each buffer zone
     changing_feature_B1_intersection = calculate_intersection_area(
@@ -697,6 +699,7 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
     scope = scope[scope.geometry.type == 'Polygon']
     scope = remove_slivers(scope, sliver_threshold)
 
+    # TODO does this even work?
     # Simplify merging overlapping polygons by assigning a constant group value
     scope['group'] = 0
     scope = scope.dissolve(by='group').explode(
@@ -803,6 +806,7 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
 # ---> Construction Output Shapefile Creation <---
 
 print()
+
 construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
 

@@ -1,5 +1,19 @@
 # gis-lagefaktor
 
+## TODO
+
+- do linear contruction and compensatory work? Test it
+- was bedeuten die area einschränkungen bei den schutzgebieten in der lagefaktor tabelle?
+- lagefaktor <100 ist falsch in bänbelitz (1) ????
+- es gibt noch sliver bei construction in bäbelitz
+
+Hendrik:
+
+- schutz gebiet und interference area lagefakltoren beide oder nur einer?
+- vorbeck anschauen, mindestfläceh für kompensation im schutzgebiet?
+- zählen dann die separate oder wird die mindestfläche anhand der gesamtfläceh (schutzgebiet und nicht schutzgebiet tzsammen)
+- 2000 qm mindestfläche bei kompensation? auch bei schutzgebiten?
+
 ## Usage
 
 ### Running the script
