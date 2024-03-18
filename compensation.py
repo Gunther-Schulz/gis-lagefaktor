@@ -561,7 +561,7 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
 
     # Rename 'name' column in changing_features
     changing_features = changing_features.rename(
-        columns={'name': 'changing_n'})
+        columns={'name': 'base_name'})
 
     # Punch holes
     changing_features = gpd.overlay(
@@ -571,9 +571,9 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     intersected_features = gpd.overlay(
         base_features, changing_features, how='intersection')
 
-    # Select only the columns from base_features and add 'changing_n'
+    # Select only the columns from base_features and add 'base_name'
     intersected_features = intersected_features[base_features.columns]
-    intersected_features['changing_n'] = changing_features['changing_n']
+    intersected_features['base_name'] = changing_features['base_name']
 
     # Flatten the result into a single geometry and keep the first unique value for each group
     base_features = intersected_features.dissolve(
@@ -583,7 +583,7 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     base_features.reset_index(drop=False, inplace=True)
 
     # Merge the base_features with the changing_features
-    base_features['base_value'] = base_features['changing_n'].map(
+    base_features['base_value'] = base_features['base_name'].map(
         lambda x: get_value_with_warning(values, x))
 
     return base_features
@@ -1015,12 +1015,39 @@ def write_output_json_and_excel(total_score, data, filename='output'):
     # Convert the data to a DataFrame and write it to an Excel file
     df = pd.DataFrame(data)
 
+    if filename == 'Construction':
+        # Rename the columns to a more readable format
+        df = df.rename(columns={
+            "name": "Name",
+            "base_name": "Bestandsfläche (base_name)",
+            "base_value": "Bestandsflächenwert (base_value)",
+            "prot_name": "Schutzgebiet (prot_name)",
+            "prot_cons": "Schutzstgebietsfaktor (prot_cons)",
+            "lagefaktor": "Lagefaktor (lagefaktor)",
+            "buffer_dis": "Pufferzone (buffer_dis)",
+            "score": "Punktzahl (score)",
+            "area": "Fläche (area)"
+        })
+
+    if filename == 'Compensatory':
+        # Rename the columns to a more readable format
+        df = df.rename(columns={
+            "name": "Name",
+            "base_name": "Bestandsfläche (base_name)",
+            "base_value": "Bestandsflächenwert (base_value)",
+            "compensat": "Kompensationswert (compensat)",
+            "eligible": "Berechtigt (eligible)",
+            "prot_name": "Schutzgebiet (prot_name)",
+            "prot_comp": "Schutzstgebietsfaktor (prot_comp)",
+            "score": "Punktzahl (score)",
+            "area": "Fläche (area)"
+        })
+
     # Append total_score to the bottom of the DataFrame using pd.concat
     df = pd.concat(
-        [df, pd.DataFrame({'total_score': [total_score]})], ignore_index=True)
+        [df, pd.DataFrame({'Punktzahl': [total_score]})], ignore_index=True)
 
     df.to_excel(os.path.join(OUTPUT_DIR, filename + '.xlsx'), index=False)
-
 
 # ----> Main Logic Flow <----
 
@@ -1044,9 +1071,14 @@ protected_area_features = preprocess_features(
 
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
+# remove column prot_cons
+compensatory_features = compensatory_features.drop(columns='prot_cons')
 
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
+# remove column prot_comp
+construction_feature_buffer_zones = construction_feature_buffer_zones.drop(
+    columns='prot_comp')
 
 
 # ---> Construction Output Shapefile Creation <---
