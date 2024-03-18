@@ -22,6 +22,8 @@ GRZ_FACTORS = {
     '0.5': [0.5, 0.2, 0.6],
     '0.75': [0.75, 0.5, 0.8]
 }
+# DEFAULT_SLIVER = 0.0001
+DEFAULT_SLIVER = 0.001
 
 
 # Create the parser
@@ -108,6 +110,9 @@ COMPENSATORY_MEASURE_MINIMUM_AREAS = {
 COMPENSATORY_PROTECTED_VALUES = {
     'NSG': 1.1, 'VSG': 1.15, 'GGB': 1.25, 'Test': 2, 'Test2': 4}
 
+# Global debug counter dictionary
+debug_counter_dict = {}
+
 
 def get_calling_function_name():
     """
@@ -123,8 +128,6 @@ def get_calling_function_name():
         if fn_module is not None and fn_module.__name__ == "__main__":
             return frame.f_code.co_name
         frame = frame.f_back
-
-    # find teh line number where the function is called
 
     return None
 
@@ -148,6 +151,16 @@ def get_calling_line_number():
 
 
 def custom_warning(message, category, filename, lineno, file=None, line=None):
+    """
+    This function reads a shapefile from a given file path, transforms its CRS, and adds an encoded name column.
+
+    Parameters:
+    file_path (str): The file path from which to read the shapefile.
+
+    Returns:
+    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 's_name' column 
+    representing the encoded name of the shapefile's parent directory.
+    """
     no_buffer_pattern = r"`?keep_geom_type=True`? in overlay resulted in .* dropped geometries of .* than .*\. Set `?keep_geom_type=False`? to retain all geometries"
     keepdims_pattern = r"<class 'geopandas.array.GeometryArray'>._reduce will require a `keepdims` parameter in the future"
     match_no_buffer = re.search(no_buffer_pattern, str(message))
@@ -169,8 +182,56 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
 warnings.showwarning = custom_warning
 
 
-def pt(df, table_name=None):
+def debug(gdf, prefix='', include_stack=True):
+    """
+    This function writes a GeoDataFrame to a shapefile for debugging purposes.
 
+    Parameters:
+    gdf (GeoDataFrame): The GeoDataFrame to write.
+    prefix (str, optional): An optional prefix to add to the filename.
+    include_stack (bool, optional): Whether to include the line numbers of the entire call stack in the filename.
+
+    Returns:
+    None
+    """
+    if args.debug:
+        # Get the name of the calling function and line number
+        frame = inspect.stack()[1]
+        calling_function = frame.function
+        line_number = frame.lineno
+
+        # Get the line numbers of the entire call stack
+        if include_stack:
+            stack_line_numbers = '-'.join(
+                str(frame.lineno) for frame in inspect.stack()[2:])
+        else:
+            stack_line_numbers = str(inspect.stack()[2].lineno)
+
+        # Increment the counter for the calling function
+        debug_counter_dict[calling_function] = debug_counter_dict.get(
+            calling_function, 0) + 1
+
+        if prefix:
+            prefix = '_' + prefix
+        # Create the filename
+        filename = os.path.join(
+            DEBUG_DIR, f"{calling_function}_{stack_line_numbers}-{line_number}{prefix}_#{debug_counter_dict[calling_function]}.shp")
+
+        # Write the GeoDataFrame to a shapefile
+        gdf.to_file(filename)
+
+
+def pt(df, table_name=None):
+    """
+    This function prints a DataFrame in a fixed-width format.
+
+    Parameters:
+    df (DataFrame): The DataFrame to print.
+    table_name (str, optional): The name of the table. Defaults to None.
+
+    Returns:
+    None
+    """
     # get the name of the calling function
     fn_name = sys._getframe(1).f_code.co_name
 
@@ -210,6 +271,15 @@ def pt(df, table_name=None):
 
 
 def normalize_string(input_string):
+    """
+    This function normalizes a string using NFC normalization and encodes it in ISO-8859-1.
+
+    Parameters:
+    input_string (str): The string to normalize.
+
+    Returns:
+    str: The normalized string.
+    """
     normalized_string = unicodedata.normalize('NFC', input_string)
     encoded_string = normalized_string.encode(
         'ISO-8859-1', 'replace').decode('ISO-8859-1')
@@ -217,6 +287,16 @@ def normalize_string(input_string):
 
 
 def get_value_with_warning(values, key):
+    """
+    This function retrieves a value from a dictionary, printing a warning if the key is not found.
+
+    Parameters:
+    values (dict): The dictionary from which to retrieve the value.
+    key (str): The key of the value to retrieve.
+
+    Returns:
+    The value associated with the key, or None if the key is not found.
+    """
     normalized_key = normalize_string(key)
     normalized_values = {normalize_string(k): v for k, v in values.items()}
 
@@ -254,6 +334,16 @@ def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=25
 
 
 def read_shapefile(file_path):
+    """
+    This function reads a shapefile from a given file path, transforms its CRS, and adds an encoded name column.
+
+    Parameters:
+    file_path (str): The file path from which to read the shapefile.
+
+    Returns:
+    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 's_name' column 
+    representing the encoded name of the shapefile's parent directory.
+    """
     s_name = os.path.basename(os.path.dirname(file_path))
     encoded_s_name = normalize_string(s_name)
     print(colored(
@@ -266,6 +356,15 @@ def read_shapefile(file_path):
 
 
 def get_features(dir):
+    """
+    This function reads shapefiles from a given directory and returns a GeoDataFrame of the features.
+
+    Parameters:
+    dir (str): The directory from which to read the shapefiles.
+
+    Returns:
+    GeoDataFrame: A GeoDataFrame containing the features from the shapefiles.
+    """
     print(colored(
         f'Reading shapefiles from directory "{os.path.basename(dir)}":', 'yellow', attrs=['dark']))
     shapefiles = glob.glob(f"{dir}/*/*.shp")
@@ -285,18 +384,39 @@ def get_features(dir):
 
 
 def create_buffer(linestrings, distance):
+    """
+    This function creates a buffer around each linestring and dissolves all geometries into a single one.
+
+    Parameters:
+    linestrings (GeoSeries): The linestrings around which to create buffers.
+    distance (float): The distance for the buffer.
+
+    Returns:
+    GeoDataFrame: A GeoDataFrame containing the buffers.
+    """
     # Create a buffer around each linestring and dissolve all geometries into a single one
     buffers = linestrings.buffer(distance).to_frame().rename(
         columns={0: 'geometry'}).set_geometry('geometry').dissolve()
+    debug(buffers)
     return buffers
 
 
 def get_buffers(features, distances):
+    """
+    This function creates buffers around the given features for each specified distance.
+
+    Parameters:
+    features (GeoDataFrame): The geospatial features for which to create buffers.
+    distances (list): A list of distances for which to create buffers.
+
+    Returns:
+    list: A list of GeoDataFrames, each representing the buffers around the features at a specific distance.
+    """
     # Create a buffer for each distance and return the list of buffers
     return [create_buffer(features, distance) for distance in distances]
 
-
 # ----> Feature Cleanup and Geometry Manipulation <----
+
 
 def cleanup_and_merge_features(feature, buffer_distance):
     """
@@ -368,7 +488,7 @@ def resolve_overlaps(feature):
     return resolved
 
 
-def remove_slivers(gdf, buffer_distance=0.0001):
+def remove_slivers(gdf, buffer_distance=DEFAULT_SLIVER):
     """
     Removes slivers from geometries by applying a small buffer.
 
@@ -501,7 +621,14 @@ def filter_features(scope, features):
 
 def add_lagefaktor_values(feature, lagefaktor_value):
     """
-    Adds or updates the 'lagefaktor' column in the feature GeoDataFrame.
+    This function adds 'lagefaktor' values to the given feature GeoDataFrame.
+
+    Parameters:
+    feature (GeoDataFrame): The GeoDataFrame to which to add 'lagefaktor' values.
+    lagefaktor_value (float): The 'lagefaktor' value to add.
+
+    Returns:
+    GeoDataFrame: The updated GeoDataFrame with 'lagefaktor' values.
     """
     if 'protected' in feature.columns:
         feature['lagefaktor'] = feature['protected'].fillna(lagefaktor_value)
@@ -517,7 +644,14 @@ def add_lagefaktor_values(feature, lagefaktor_value):
 
 def add_compensatory_value(compensatory_features, protected_area_features):
     """
-    Adds a 'compensat' and 'eligible' column to compensatory_features based on 's_name' values.
+    This function adds compensatory values to the given compensatory features GeoDataFrame.
+
+    Parameters:
+    compensatory_features (GeoDataFrame): The GeoDataFrame to which to add compensatory values.
+    protected_area_features (GeoDataFrame): The GeoDataFrame of protected area features.
+
+    Returns:
+    GeoDataFrame: The updated GeoDataFrame with compensatory values.
     """
     compensatory_features['compensat'] = compensatory_features['s_name'].apply(
         lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
@@ -539,7 +673,15 @@ def add_compensatory_value(compensatory_features, protected_area_features):
 
 def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
     """
-    Processes base_feature and cover_features GeoDataFrames to handle overlaps and differences.
+    This function processes overlaps in a GeoDataFrame.
+
+    Parameters:
+    base_feature (GeoDataFrame): The base GeoDataFrame.
+    cover_features (GeoDataFrame): The GeoDataFrame of features that may overlap with the base features.
+    sort_by (str, optional): The column by which to sort the GeoDataFrames. Defaults to None.
+
+    Returns:
+    GeoDataFrame: The processed GeoDataFrame with overlaps resolved.
     """
     if not cover_features.empty:
         cover_features = cover_features.sort_values(
@@ -563,25 +705,38 @@ def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
                                    how='union') if not non_overlapping_areas.empty and not overlapping_areas.empty else overlapping_areas
         base_feature = consolidate_columns(base_feature)
 
-        base_feature = remove_slivers(base_feature, 0.001)
+        base_feature = remove_slivers(base_feature)
 
     return base_feature
 
 
 def dissolve_sort_and_resolve(feature, by_column):
     """
-    Dissolves, sorts, and resolves overlaps in a GeoDataFrame.
+    This function dissolves, sorts, and resolves overlaps in a GeoDataFrame.
+
+    Parameters:
+    feature (GeoDataFrame): The GeoDataFrame to process.
+    by_column (str): The column by which to dissolve and sort the GeoDataFrame.
+
+    Returns:
+    GeoDataFrame: The processed GeoDataFrame.
     """
     feature = feature.dissolve(by=by_column, aggfunc='first').reset_index()
     feature.sort_values(by=by_column, ascending=False, inplace=True)
     feature = resolve_overlaps(feature)
-    feature = remove_slivers(feature, 0.001)
+    feature = remove_slivers(feature)
     return feature
 
 
 def consolidate_columns(feature):
     """
-    Consolidates columns with matching initial substrings in a GeoDataFrame.
+    This function consolidates columns in a GeoDataFrame.
+
+    Parameters:
+    feature (GeoDataFrame): The GeoDataFrame to process.
+
+    Returns:
+    GeoDataFrame: The processed GeoDataFrame with consolidated columns.
     """
     non_geometry_columns = feature.columns.difference(['geometry'])
     for column in non_geometry_columns:
@@ -608,7 +763,17 @@ def consolidate_columns(feature):
 
 def calculate_intersection_area(construction_feature, buffer, buffer_distance, protected_area_features, scope):
     """
-    Calculate the intersection area of construction features with a buffer and process overlaps.
+    This function calculates the intersection area of a construction feature and a buffer.
+
+    Parameters:
+    construction_feature (GeoDataFrame): The construction feature.
+    buffer (GeoDataFrame): The buffer.
+    buffer_distance (float): The buffer distance.
+    protected_area_features (GeoDataFrame): The protected area features.
+    scope (str): The scope of the calculation.
+
+    Returns:
+    GeoDataFrame: The intersection area.
     """
     intersection = calculate_overlay(
         construction_feature, buffer, 'intersection')
@@ -623,9 +788,17 @@ def calculate_intersection_area(construction_feature, buffer, buffer_distance, p
 
 def process_and_separate_buffer_zones(scope, construction_feature, buffers, protected_area_features):
     """
-    Separate features based on their intersection with different buffer zones and process them.
-    """
+    This function processes and separates buffer zones.
 
+    Parameters:
+    scope (str): The scope of the processing.
+    construction_feature (GeoDataFrame): The construction feature.
+    buffers (list): The list of buffers.
+    protected_area_features (GeoDataFrame): The protected area features.
+
+    Returns:
+    GeoDataFrame: The processed and separated buffer zones.
+    """
     # Calculate intersections for each buffer zone
     changing_feature_B1_intersection = calculate_intersection_area(
         construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
@@ -678,7 +851,7 @@ def add_construction_score(features, grz):
     return features
 
 
-def process_geometric_scope(scope, construction_features, compensatory_features, sliver_threshold=0.001):
+def process_geometric_scope(scope, construction_features, compensatory_features, sliver_threshold):
     """
     Process and merge geometric features for a given scope.
 
@@ -712,6 +885,19 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
 
 
 def process_features(directory, feature_type, unchanged_features, changing_features, changing_values):
+    """
+    This function processes geospatial features from a given directory.
+
+    Parameters:
+    directory (str): The directory from which to read the features.
+    feature_type (str): The type of the features.
+    unchanged_features (GeoDataFrame): The features that remain unchanged.
+    changing_features (GeoDataFrame): The features that are changing.
+    changing_values (list): The values that are changing.
+
+    Returns:
+    GeoDataFrame: The processed features.
+    """
     features = get_features(directory)
     features = preprocess_features(features, feature_type)
     features = process_and_overlay_features(
@@ -720,7 +906,16 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
 
 
 def calculate_compensatory_score(row, current_features):
+    """
+    This function calculates the compensatory score for a row in a GeoDataFrame.
 
+    Parameters:
+    row (GeoSeries): The row for which to calculate the compensatory score.
+    current_features (GeoDataFrame): The current features.
+
+    Returns:
+    float: The compensatory score.
+    """
     if row['eligible'] == True:
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
         if 'protected' in current_features.columns and pd.notnull(row['protecte_t']):
@@ -733,6 +928,16 @@ def calculate_compensatory_score(row, current_features):
 
 
 def add_compensatory_score(features, scope):
+    """
+    This function adds compensatory scores to a GeoDataFrame of features.
+
+    Parameters:
+    features (GeoDataFrame): The features to which to add compensatory scores.
+    scope (str): The scope of the operation.
+
+    Returns:
+    GeoDataFrame: The features with added compensatory scores.
+    """
     all_features = pd.DataFrame()
     for file in features['s_name'].unique():
         current_features = filter_features(
@@ -744,11 +949,32 @@ def add_compensatory_score(features, scope):
 
 
 def save_features_to_file(features, filename):
+    """
+    This function saves a GeoDataFrame of features to a file.
+
+    Parameters:
+    features (GeoDataFrame): The features to save.
+    filename (str): The name of the file to which to save the features.
+
+    Returns:
+    None
+    """
     features.to_file(os.path.join(OUTPUT_DIR, filename),
                      driver='ESRI Shapefile')
 
 
 def write_output_json_and_excel(total_score, data, filename='output'):
+    """
+    This function writes output data to a JSON file and an Excel file.
+
+    Parameters:
+    total_score (float): The total score to write.
+    data (GeoDataFrame): The data to write.
+    filename (str, optional): The name of the files to which to write the data. Defaults to 'output'.
+
+    Returns:
+    None
+    """
     data = data.copy()
     data['area'] = data.geometry.area.round(2)
     data = data.drop(columns='geometry')
