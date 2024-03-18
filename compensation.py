@@ -202,8 +202,6 @@ def debug(gdf, prefix='', include_line_numbers=False):
             calling_function = 'main'
         line_number = frame.lineno
 
-        # print length of stack
-        print(len(inspect.stack()))
         # Get the line numbers of the entire call stack
         stack_line_numbers = '-'.join(
             str(frame.lineno) for frame in reversed(inspect.stack()[2:]))
@@ -534,10 +532,13 @@ def preprocess_features(features, feature_type, buffer_distance=10):
         processed_features['compensat'] = processed_features['s_name'].map(
             lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
     elif feature_type == 'protected_area':
-        # Set 'protected' value based on 's_name'
-        processed_features['protected'] = processed_features['s_name'].apply(
+        # Set 'prot_cons' and 'prot_comp' based on 's_name'
+        processed_features['prot_cons'] = processed_features['s_name'].apply(
             lambda x: get_value_with_warning(CONSTRUCTION_PROTECTED_VALUES, x))
-        debug(processed_features, 'processed_features_protected')
+        processed_features['prot_comp'] = processed_features['s_name'].apply(
+            lambda x: get_value_with_warning(COMPENSATORY_PROTECTED_VALUES, x))
+        processed_features = processed_features.rename(
+            columns={'s_name': 'protect_t'})
     return processed_features
 
 
@@ -639,15 +640,15 @@ def add_lagefaktor_values(feature, lagefaktor_value):
     Returns:
     GeoDataFrame: The updated GeoDataFrame with 'lagefaktor' values.
     """
-    if 'protected' in feature.columns:
-        # Check if 'protected' is not null for each polygon
-        is_protected_not_null = feature['protected'].notnull()
 
-        feature['lagefaktor'] = feature['protected'].fillna(lagefaktor_value)
+    if 'prot_cons' in feature.columns:
+        # Check if 'prot_cons' is not null
+        is_protected_not_null = feature['prot_cons'].notnull()
+
+        feature['lagefaktor'] = feature['prot_cons'].fillna(lagefaktor_value)
         if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
-            # Only subtract 0.27 from 'lagefaktor' for polygons where 'protected' is not null
+            # Only subtract 0.25 from 'lagefaktor' if 'prot_cons' is not null
             feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
-            debug(feature, 'feature_with_lagefaktor')
     else:
         feature['lagefaktor'] = lagefaktor_value
 
@@ -675,15 +676,15 @@ def add_compensatory_value(compensatory_features, protected_area_features):
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
-            by='protected', ascending=False)
+            by='prot_comp', ascending=False)
         protected_area_features = resolve_overlaps(protected_area_features)
         compensatory_features = process_geodataframe_overlaps(
-            compensatory_features, protected_area_features, 'protected')
+            compensatory_features, protected_area_features)
 
     return compensatory_features
 
 
-def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
+def process_geodataframe_overlaps(base_feature, cover_features):
     """
     This function processes overlaps in a GeoDataFrame.
 
@@ -696,27 +697,28 @@ def process_geodataframe_overlaps(base_feature, cover_features, sort_by=None):
     GeoDataFrame: The processed GeoDataFrame with overlaps resolved.
     """
     if not cover_features.empty:
-        cover_features = cover_features.sort_values(
-            by=sort_by, ascending=False)
+        # cover_features = cover_features.sort_values(
+        #     by=sort_by, ascending=False)
         cover_features = resolve_overlaps(cover_features)
 
-        new_column_name = f'{sort_by[:8]}_t'
-        cover_features = cover_features.rename(
-            columns={'s_name': new_column_name})
+        # new_column_name = f'{sort_by[:8]}_t'
+        # cover_features = cover_features.rename(
+        #     columns={'s_name': new_column_name})
 
         # Print old and new column name in one line
-        print(
-            f"During overlap operation, renaming: {sort_by} -> {new_column_name}")
+        # print(
+        #     f"During overlap operation, renaming: {sort_by} -> {new_column_name}")
 
         overlapping_areas = gpd.overlay(
             base_feature, cover_features, how='intersection')
+
         non_overlapping_areas = gpd.overlay(
             base_feature, cover_features, how='difference')
 
         base_feature = gpd.overlay(non_overlapping_areas, overlapping_areas,
                                    how='union') if not non_overlapping_areas.empty and not overlapping_areas.empty else overlapping_areas
-        base_feature = consolidate_columns(base_feature)
 
+        base_feature = consolidate_columns(base_feature)
         base_feature = remove_slivers(base_feature)
 
     return base_feature
@@ -752,8 +754,9 @@ def consolidate_columns(feature):
     """
     non_geometry_columns = feature.columns.difference(['geometry'])
     for column in non_geometry_columns:
-        matching_columns = [col for col in feature.columns if col.split('_')[
-            0] == column.split('_')[0]]
+        base_name = re.split('_\d+', column)[0]
+        matching_columns = [col for col in feature.columns if re.split(
+            '_\d+', col)[0] == base_name]
         if len(matching_columns) < 2:
             continue
         matching_columns.sort(key=len)
@@ -761,12 +764,11 @@ def consolidate_columns(feature):
             feature[matching_columns[0]] = feature[matching_columns[0]
                                                    ].combine_first(feature[matching_column])
         feature = feature.drop(columns=matching_columns[1:])
-        base_name = matching_columns[0].rsplit('_', 1)[0]
         old_column_name = matching_columns[0]
         feature = feature.rename(columns={old_column_name: base_name})
 
-        # # Print old and new column name
-        # print(f"While consolidating columns: {old_column_name} -> {base_name}")
+        # Print old and new column name
+        print(f"While consolidating columns: {old_column_name} -> {base_name}")
 
     return feature
 
@@ -790,7 +792,7 @@ def calculate_intersection_area(construction_feature, buffer, buffer_distance, p
     intersection = calculate_overlay(
         construction_feature, buffer, 'intersection')
     intersection = process_geodataframe_overlaps(
-        intersection, protected_area_features, 'protected')
+        intersection, protected_area_features)
     intersection = add_lagefaktor_values(
         intersection, CONSTRUCTION_LAGEFAKTOR_VALUES[buffer_distance])
     intersection = filter_features(scope, intersection)
@@ -811,26 +813,28 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     Returns:
     GeoDataFrame: The processed and separated buffer zones.
     """
+
+    # Sort protected_area_features by 'prot_cons' in descending order
+    protected_area_features = protected_area_features.sort_values(
+        by='prot_cons', ascending=False)
+
     # Calculate intersections for each buffer zone
     changing_feature_B1_intersection = calculate_intersection_area(
         construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
-    debug(changing_feature_B1_intersection, 'changing_feature_B1_intersection')
 
     # Calculate intersection for buffer B2
     changing_feature_B2_intersection = calculate_intersection_area(
         construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, scope)
-    debug(changing_feature_B2_intersection, 'changing_feature_B2_intersection')
 
     # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
     changing_feature_B2_not_B1 = calculate_overlay(
         changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference')
-    debug(changing_feature_B2_not_B1, 'changing_feature_B2_not_B1')
 
     # Calculate area outside B2 by taking the difference between the construction feature and buffer B2
     changing_feature_outside_B2 = calculate_overlay(
         construction_feature, buffers[1], 'difference')
     changing_feature_outside_B2 = process_geodataframe_overlaps(
-        changing_feature_outside_B2, protected_area_features, 'protected')
+        changing_feature_outside_B2, protected_area_features)
     changing_feature_outside_B2 = add_lagefaktor_values(
         changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES[BUFFER_DISTANCES['>625']])
     changing_feature_outside_B2 = filter_features(
@@ -934,10 +938,10 @@ def calculate_compensatory_score(row, current_features):
     """
     if row['eligible'] == True:
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
-        if 'protected' in current_features.columns and pd.notnull(row['protecte_t']):
+        if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
             final_v = final_v * \
                 get_value_with_warning(
-                    COMPENSATORY_PROTECTED_VALUES, row['protecte_t'])
+                    COMPENSATORY_PROTECTED_VALUES, row['protect_t'])
         return final_v
     else:
         return 0
@@ -1041,10 +1045,8 @@ protected_area_features = preprocess_features(
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
-debug(construction_features, 'construction_features')
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
-debug(construction_feature_buffer_zones, 'construction_feature_buffer_zones')
 
 
 # ---> Construction Output Shapefile Creation <---
