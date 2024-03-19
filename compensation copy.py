@@ -655,12 +655,12 @@ def add_lagefaktor_values(feature, lagefaktor_value):
         if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
             # Only subtract 0.25 from 'lagefaktor' if 'prot_cons' is not null
             feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
+
+        # remove column prot_comp if it exists
+        if 'prot_comp' in features.columns:
+            features = features.drop(columns='prot_comp')
     else:
         feature['lagefaktor'] = lagefaktor_value
-    # remove column prot_comp if it exists
-    if 'prot_comp' in feature.columns:
-        feature = feature.drop(columns='prot_comp')
-    pt(feature, 'feature')
 
     return feature
 
@@ -1101,9 +1101,9 @@ compensatory_features = add_compensatory_value(
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
-# compensatory_features = filter_area_limit(compensatory_features, 0.1)
-# construction_feature_buffer_zones = filter_area_limit(
-#     construction_feature_buffer_zones, 0.1)
+compensatory_features = filter_area_limit(compensatory_features, 0.1)
+construction_feature_buffer_zones = filter_area_limit(
+    construction_feature_buffer_zones, 0.1)
 
 # ---> Construction Output Shapefile Creation <---
 
