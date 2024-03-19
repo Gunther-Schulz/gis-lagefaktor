@@ -4,6 +4,7 @@ Flächig umzusetzende Kompensationsmaßnahmen und Bauflächen werden in ihrer La
 
 ## TODO
 
+- ignore areas below set size (Freirichshof has small compensatory areas)
 - es gibt noch sliver bei construction in bäbelitz. i don't think it can be solved with remove_sliver. need to debug the intermediary shapes
 - do linear/point construction and compensatory work? Test it
 - test having different compensation and construction types in the same project
@@ -98,16 +99,15 @@ The debug directory contains debug shape files that are used to visualize the in
 
 ### Bäbelitz:
 
-Total final value: 196169.43
-Total final value for compensatory features: 278066.28
+Total Construction score: 196167.92
+Total Compensatory score: 265845.5
 
 ### Friedrichshof
 
-Total final value: 160418.42
-Total final value for compensatory features: 31148.58
+Total Construction score: 160411.33
+Total Compensatory score: 31131.53
 
 ### Vorbeck
 
-Total final value: 294992.93
-Total final value for compensatory features: 310305.83
-(The old compensatory value was: 267277.98. I am guessing that only the large compensatory area was used for the old value)
+Total Construction score: 247094.21
+Total Compensatory score: 273738.07

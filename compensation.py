@@ -25,6 +25,7 @@ GRZ_FACTORS = {
 # DEFAULT_SLIVER = 0.0001
 DEFAULT_SLIVER = 0.001
 
+AREA_LIMIT = 1
 
 # Create the parser
 parser = argparse.ArgumentParser(
@@ -565,31 +566,38 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     # Rename 'name' column in changing_features
     changing_features = changing_features.rename(
         columns={'name': 'base_name'})
-
+    pt(changing_features, 'rename changing_features')
     # Punch holes
     changing_features = gpd.overlay(
         changing_features, unchanged_features, how='difference')
+    pt(changing_features, 'punch holes')
 
     # Overlay base_features with changing_features
     intersected_features = gpd.overlay(
         base_features, changing_features, how='intersection')
+    pt(intersected_features, 'overlay')
 
     # Select only the columns from base_features and add 'base_name'
     intersected_features = intersected_features[base_features.columns]
     intersected_features['base_name'] = changing_features['base_name']
+    pt(intersected_features, 'select columns')
+    debug(intersected_features, 'intersected_features')
+    # # Flatten the result into a single geometry and keep the first unique value for each group
+    # base_features = intersected_features.dissolve(
+    #     by='name', aggfunc='first').explode(index_parts=False)
 
-    # Flatten the result into a single geometry and keep the first unique value for each group
-    base_features = intersected_features.dissolve(
-        by='name', aggfunc='first').explode(index_parts=False)
+    # # Reset the index
+    # base_features.reset_index(drop=False, inplace=True)
 
-    # Reset the index
-    base_features.reset_index(drop=False, inplace=True)
+    # # Merge the base_features with the changing_features
+    # base_features['base_value'] = base_features['base_name'].map(
+    #     lambda x: get_value_with_warning(values, x))
 
-    # Merge the base_features with the changing_features
-    base_features['base_value'] = base_features['base_name'].map(
+    intersected_features['base_value'] = intersected_features['base_name'].map(
         lambda x: get_value_with_warning(values, x))
 
-    return base_features
+    # return base_features
+    return intersected_features
 
 
 def calculate_overlay(feature1, feature2, operation):
@@ -652,6 +660,10 @@ def add_lagefaktor_values(feature, lagefaktor_value):
         if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
             # Only subtract 0.25 from 'lagefaktor' if 'prot_cons' is not null
             feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
+
+        # remove column prot_comp if it exists
+        if 'prot_comp' in features.columns:
+            features = features.drop(columns='prot_comp')
     else:
         feature['lagefaktor'] = lagefaktor_value
 
@@ -683,6 +695,7 @@ def add_compensatory_value(compensatory_features, protected_area_features):
         protected_area_features = resolve_overlaps(protected_area_features)
         compensatory_features = process_geodataframe_overlaps(
             compensatory_features, protected_area_features)
+        compensatory_features = compensatory_features.drop(columns='prot_cons')
 
     return compensatory_features
 
@@ -846,6 +859,7 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
 
     features = pd.concat([changing_feature_B1_intersection, changing_feature_B2_not_B1,
                           changing_feature_outside_B2], ignore_index=True)
+
     return features
 
 
@@ -1074,15 +1088,10 @@ protected_area_features = preprocess_features(
 
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
-# remove column prot_cons
-compensatory_features = compensatory_features.drop(columns='prot_cons')
 
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
-# remove column prot_comp
-construction_feature_buffer_zones = construction_feature_buffer_zones.drop(
-    columns='prot_comp')
-pt(construction_feature_buffer_zones)
+
 
 # ---> Construction Output Shapefile Creation <---
 
