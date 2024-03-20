@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+from matplotlib.lines import Line2D
+import matplotlib.transforms as mtransforms
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.patches import Patch
 from matplotlib.legend import Legend
 import numpy as np
 from matplotlib.colors import ListedColormap
@@ -988,95 +992,103 @@ def add_compensatory_score(features, scope):
     return all_features
 
 
-def save_features_to_file(features, filename, interference, scope):
+def save_to_shapefile(features, filename):
     """
-    This function saves a GeoDataFrame of features to a file.
-
-    Parameters:
-    features (GeoDataFrame): The features to save.
-    filename (str): The name of the file to which to save the features.
-
-    Returns:
-    None
     """
     features.to_file(os.path.join(OUTPUT_DIR, filename),
                      driver='ESRI Shapefile')
 
-    pt(features)
+
+def create_plot(construction_features, compensation_features, interference, scope):
+    """
+    """
+
     # Assuming 'features' is a GeoDataFrame
     fig, ax = plt.subplots(1, 1)
 
     column_name = ''
+    handles = []
+    labels = []
 
-    if 'buffer_dis' in features.columns:
+    if 'buffer_dis' in construction_features.columns:
         column_name = 'buffer_dis'
 
         # Define a colormap with enough colors for each unique value in 'buffer_dis'
         cmap = ListedColormap(plt.cm.viridis(np.linspace(
-            0, 1, len(features[column_name].unique()))))
+            0, 1, len(construction_features[column_name].unique()))))
 
         # Plot 'buffer_dis' with the colormap
-        features_map = features.plot(column=column_name, ax=ax, cmap=cmap)
-
-        # Plot 'interference' on the same axes
-        interference.plot(ax=ax, color='red')
-
-        # Plot 'scope' on the same axes with dashed lines and no fill
-        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+        features_map = construction_features.plot(
+            column=column_name, ax=ax, cmap=cmap, edgecolor='black', linewidth=0.5)
 
         # Create a legend entry for each unique value in 'buffer_dis'
-        buffer_dis_patches = [mpatches.Patch(color=cmap(
-            i), label=label) for i, label in enumerate(features[column_name].unique())]
+        buffer_dis_patches = [Patch(color=cmap(
+            i), label=label) for i, label in enumerate(construction_features[column_name].unique())]
 
-        # Convert 'buffer_dis_patches' and 'features[column_name].unique()' to lists
-        buffer_dis_patches = list(buffer_dis_patches)
-        buffer_dis_labels = list(features[column_name].unique())
+        handles.append(Patch(facecolor='none', edgecolor='none',
+                       label='Störungsquellendistanz'))
+        handles.extend(buffer_dis_patches)
+        labels.append('Störungsquellendistanz')
+        labels.extend(construction_features[column_name].unique())
 
-        # Create a legend for 'buffer_dis'
-        legend1 = ax.legend(handles=buffer_dis_patches,
-                            labels=buffer_dis_labels,
-                            title='Buffer Distance',  # Add title here
-                            loc='upper left', bbox_to_anchor=(1.05, 1))
-        # Add the first legend manually to the current Axes.
-        ax.add_artist(legend1)
-
-        # Create a legend entry for 'interference'
-        interference_patch = mpatches.Patch(color='red', label='Interference')
-
-        # Create a second legend for 'interference', use the same location parameters
-        ax.legend(handles=[interference_patch],
-                  labels=['Interference'],
-                  title='Interference',
-                  loc='upper left', bbox_to_anchor=(1.05, 0.5))
-    elif 'compensat' in features.columns:
+    if 'compensat' in compensation_features.columns:
         column_name = 'compensat'
         # Define the color map and norm
         colors = ['red', 'green', 'blue']  # replace with the colors you want
         bounds = [1, 2, 3, 4]  # replace with the boundaries you want
-        cmap = mcolors.ListedColormap(colors)
-        norm = mcolors.BoundaryNorm(bounds, cmap.N)
+        cmap = ListedColormap(colors)
+        norm = BoundaryNorm(bounds, cmap.N)
 
         # Plot the GeoDataFrame without the legend
-        features.plot(column=column_name, ax=ax, cmap=cmap, norm=norm)
-
-        # Plot 'scope' on the same axes with dashed lines and no fill
-        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+        compensation_features.plot(
+            column=column_name, ax=ax, cmap=cmap, norm=norm, edgecolor='black', linewidth=0.5)
 
         # Get the unique values in the column
-        unique_values = features[column_name].unique()
+        unique_values = compensation_features[column_name].unique()
 
         # Create a legend entry for each unique value
-        legend_patches = [mpatches.Patch(color=cmap(
+        compensat_patches = [Patch(color=cmap(
             norm(value)), label=value) for value in unique_values]
 
-        # Add the legend to the plot
-        legend = ax.legend(handles=legend_patches)
+        handles.append(Patch(facecolor='none', edgecolor='none',
+                       label='Kompensationswert'))
+        handles.extend(compensat_patches)
+        labels.append('Kompensationswert')
+        labels.extend(unique_values)
 
-        # Set the title of the legend
-        legend.set_title("Kompensationswert")
+    # Plot 'interference' on the same axes
+    interference.plot(ax=ax, color='red')
+
+    # Create a legend entry for 'interference'
+    interference_patch = Patch(color='red', label='Störungsquelle')
+
+    handles.append(
+        Patch(facecolor='none', edgecolor='none', label='Störungsquelle'))
+    handles.append(interference_patch)
+    labels.append('Störungsquelle')
+    labels.append('Störungsquelle')
+
+    # Plot 'scope' on the same axes with dashed lines and no fill
+    scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+
+    # Create a legend entry for 'scope'
+    scope_patch = Patch(color='black', label='Geltungsbereich', fill=False)
+
+    handles.append(
+        Patch(facecolor='none', edgecolor='none', label='Geltungsbereich'))
+    handles.append(scope_patch)
+    labels.append('Geltungsbereich')
+    labels.append('Geltungsbereich')
+
+    # Create a single legend for all entries
+    plt.legend(handles=handles, labels=labels,
+               loc='upper left', bbox_to_anchor=(1, 1))
 
     plt.title(PROJECT_NAME)
-    plt.show()
+    # plt.show()
+    # write plot to file
+    plt.savefig(os.path.join(OUTPUT_DIR, PROJECT_NAME +
+                '_plot.png'), dpi=300, bbox_inches='tight')
 
 
 def write_output_json_and_excel(total_score, data, filename='output'):
@@ -1233,8 +1245,9 @@ for file in construction_feature_buffer_zones['name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['name'] == file])
     check_and_warn_column_length(current_features)
-    save_features_to_file(
-        current_features, 'Construction_' + file, interference, scope)
+    save_to_shapefile(
+        current_features, 'Construction_' + file)
+
 
 write_output_json_and_excel(total_construction_score, construction_feature_buffer_zones,
                             'Construction')
@@ -1251,8 +1264,12 @@ for file in compensatory_features['name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['name'] == file])
     check_and_warn_column_length(current_features)
-    save_features_to_file(
-        current_features, 'Compensatory_' + file, interference, scope)
+    save_to_shapefile(
+        current_features, 'Compensatory_' + file)
 
 write_output_json_and_excel(total_compensatory_score,
                             compensatory_features, 'Compensatory')
+
+
+create_plot(construction_feature_buffer_zones, compensatory_features,
+            interference, scope)
