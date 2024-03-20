@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+from matplotlib.legend import Legend
+import numpy as np
+from matplotlib.colors import ListedColormap
+import matplotlib.patches as mpatches
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import simplejson as sjson
 import inspect
 from termcolor import colored
@@ -110,6 +116,8 @@ COMPENSATORY_MEASURE_MINIMUM_AREAS = {
     'Grünfläche': 2000, "comp_test": 100}
 COMPENSATORY_PROTECTED_VALUES = {
     'VSG': 1.1, 'GGB': 1.1, 'Test': 2, 'Test2': 4}
+
+PROJECT_NAME = args.project
 
 # Global debug counter dictionary
 debug_counter_dict = {}
@@ -657,10 +665,10 @@ def add_lagefaktor_values(feature, lagefaktor_value):
             feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
     else:
         feature['lagefaktor'] = lagefaktor_value
+
     # remove column prot_comp if it exists
     if 'prot_comp' in feature.columns:
         feature = feature.drop(columns='prot_comp')
-    pt(feature, 'feature')
 
     return feature
 
@@ -980,7 +988,7 @@ def add_compensatory_score(features, scope):
     return all_features
 
 
-def save_features_to_file(features, filename):
+def save_features_to_file(features, filename, interference, scope):
     """
     This function saves a GeoDataFrame of features to a file.
 
@@ -993,6 +1001,82 @@ def save_features_to_file(features, filename):
     """
     features.to_file(os.path.join(OUTPUT_DIR, filename),
                      driver='ESRI Shapefile')
+
+    pt(features)
+    # Assuming 'features' is a GeoDataFrame
+    fig, ax = plt.subplots(1, 1)
+
+    column_name = ''
+
+    if 'buffer_dis' in features.columns:
+        column_name = 'buffer_dis'
+
+        # Define a colormap with enough colors for each unique value in 'buffer_dis'
+        cmap = ListedColormap(plt.cm.viridis(np.linspace(
+            0, 1, len(features[column_name].unique()))))
+
+        # Plot 'buffer_dis' with the colormap
+        features_map = features.plot(column=column_name, ax=ax, cmap=cmap)
+
+        # Plot 'interference' on the same axes
+        interference.plot(ax=ax, color='red')
+
+        # Plot 'scope' on the same axes with dashed lines and no fill
+        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+
+        # Create a legend entry for each unique value in 'buffer_dis'
+        buffer_dis_patches = [mpatches.Patch(color=cmap(
+            i), label=label) for i, label in enumerate(features[column_name].unique())]
+
+        # Convert 'buffer_dis_patches' and 'features[column_name].unique()' to lists
+        buffer_dis_patches = list(buffer_dis_patches)
+        buffer_dis_labels = list(features[column_name].unique())
+
+        # Create a legend for 'buffer_dis'
+        legend1 = ax.legend(handles=buffer_dis_patches,
+                            labels=buffer_dis_labels,
+                            title='Buffer Distance',  # Add title here
+                            loc='upper left', bbox_to_anchor=(1.05, 1))
+        # Add the first legend manually to the current Axes.
+        ax.add_artist(legend1)
+
+        # Create a legend entry for 'interference'
+        interference_patch = mpatches.Patch(color='red', label='Interference')
+
+        # Create a second legend for 'interference', use the same location parameters
+        ax.legend(handles=[interference_patch],
+                  labels=['Interference'],
+                  title='Interference',
+                  loc='upper left', bbox_to_anchor=(1.05, 0.5))
+    elif 'compensat' in features.columns:
+        column_name = 'compensat'
+        # Define the color map and norm
+        colors = ['red', 'green', 'blue']  # replace with the colors you want
+        bounds = [1, 2, 3, 4]  # replace with the boundaries you want
+        cmap = mcolors.ListedColormap(colors)
+        norm = mcolors.BoundaryNorm(bounds, cmap.N)
+
+        # Plot the GeoDataFrame without the legend
+        features.plot(column=column_name, ax=ax, cmap=cmap, norm=norm)
+
+        # Plot 'scope' on the same axes with dashed lines and no fill
+        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+
+        # Get the unique values in the column
+        unique_values = features[column_name].unique()
+
+        # Create a legend entry for each unique value
+        legend_patches = [mpatches.Patch(color=cmap(
+            norm(value)), label=value) for value in unique_values]
+
+        # Add the legend to the plot
+        legend = ax.legend(handles=legend_patches)
+
+        # Set the title of the legend
+        legend.set_title("Kompensationswert")
+
+    plt.title(PROJECT_NAME)
+    plt.show()
 
 
 def write_output_json_and_excel(total_score, data, filename='output'):
@@ -1020,7 +1104,7 @@ def write_output_json_and_excel(total_score, data, filename='output'):
     # Update the new dictionary with output_dict
     final_output_dict.update(output_dict)
 
-    with open(os.path.join(OUTPUT_DIR, filename + '.json'), 'w') as file:
+    with open(os.path.join(OUTPUT_DIR, PROJECT_NAME + '_' + filename + '.json'), 'w') as file:
         sjson.dump(final_output_dict, file, ignore_nan=True,
                    ensure_ascii=False, indent=4)
 
@@ -1059,7 +1143,8 @@ def write_output_json_and_excel(total_score, data, filename='output'):
     df = pd.concat(
         [df, pd.DataFrame({'Punktzahl': [total_score]})], ignore_index=True)
 
-    df.to_excel(os.path.join(OUTPUT_DIR, filename + '.xlsx'), index=False)
+    df.to_excel(os.path.join(OUTPUT_DIR, PROJECT_NAME + '_' +
+                filename + '.xlsx'), index=False)
 
 
 def filter_area_limit(gdf, limit):
@@ -1075,6 +1160,26 @@ def filter_area_limit(gdf, limit):
     """
     return gdf[gdf.geometry.area > limit]
 
+
+def merge_by_combination(gdf, type):
+    """
+
+    """
+    # Check if type is 'construction'
+    if type == 'construction':
+        by_cols = ['name', 'base_name', 'lagefaktor', 'buffer_dis']
+        if 'prot_cons' in gdf.columns:
+            by_cols.append('prot_cons')
+        gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
+    # Check if type is 'compensatory'
+    elif type == 'compensatory':
+        by_cols = ['base_name', 'name', 'compensat']
+        if 'prot_comp' in gdf.columns:
+            by_cols.append('prot_comp')
+        gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
+    return gdf
+
+
 # ----> Main Logic Flow <----
 
 
@@ -1087,6 +1192,7 @@ changing_features = get_features(CHANGING_DIR)
 
 construction_features = process_features(
     CONSTRUCTION_DIR, 'construction', unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
+debug(construction_features, '1 construction_features')
 
 compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
@@ -1100,10 +1206,16 @@ compensatory_features = add_compensatory_value(
 
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
+debug(construction_feature_buffer_zones, '2 construction_feature_buffer_zones')
 
-# compensatory_features = filter_area_limit(compensatory_features, 0.1)
+# compensatory_features = merge_by_combination(
+#     compensatory_features, 'compensatory')
+# compensatory_features = filter_area_limit(compensatory_features, 10)
+
+# construction_feature_buffer_zones = merge_by_combination(
+#     construction_feature_buffer_zones, 'construction')
 # construction_feature_buffer_zones = filter_area_limit(
-#     construction_feature_buffer_zones, 0.1)
+#     construction_feature_buffer_zones, 10)
 
 # ---> Construction Output Shapefile Creation <---
 
@@ -1121,7 +1233,8 @@ for file in construction_feature_buffer_zones['name'].unique():
     current_features = filter_features(
         scope, construction_feature_buffer_zones[construction_feature_buffer_zones['name'] == file])
     check_and_warn_column_length(current_features)
-    save_features_to_file(current_features, 'Construction_' + file)
+    save_features_to_file(
+        current_features, 'Construction_' + file, interference, scope)
 
 write_output_json_and_excel(total_construction_score, construction_feature_buffer_zones,
                             'Construction')
@@ -1138,7 +1251,8 @@ for file in compensatory_features['name'].unique():
     current_features = filter_features(
         scope, compensatory_features[compensatory_features['name'] == file])
     check_and_warn_column_length(current_features)
-    save_features_to_file(current_features, 'Compensatory_' + file)
+    save_features_to_file(
+        current_features, 'Compensatory_' + file, interference, scope)
 
 write_output_json_and_excel(total_compensatory_score,
                             compensatory_features, 'Compensatory')
