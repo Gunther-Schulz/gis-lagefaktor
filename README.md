@@ -104,10 +104,10 @@ Total Compensatory score: 265845.5
 
 ### Friedrichshof
 
-Total Construction score: 160411.33
-Total Compensatory score: 31131.53
+Total Construction score: 160408.37
+Total Compensatory score: 31131.94
 
 ### Vorbeck
 
-Total Construction score: 247094.21
-Total Compensatory score: 273738.07
+Total Construction score: 247267.3
+Total Compensatory score: 281319.69

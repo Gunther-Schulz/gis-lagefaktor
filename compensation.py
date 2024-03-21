@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from shapely.ops import unary_union
 from matplotlib.lines import Line2D
 import matplotlib.transforms as mtransforms
 from matplotlib.colors import ListedColormap, BoundaryNorm
@@ -411,9 +412,13 @@ def get_features(dir):
     if not shapefiles:
         print(
             colored(f"No shapefiles found in directory {dir}", 'yellow', attrs=['dark']))
-        return gpd.GeoDataFrame(columns=['geometry', 'name'], crs=CRS)
+        gdf = gpd.GeoDataFrame(columns=['geometry', 'name'], crs=CRS)
+        return gdf
 
-    features = [read_shapefile(shapefile) for shapefile in shapefiles]
+    # features = [cleanup_and_merge_features(read_shapefile(shapefile))
+    #             for shapefile in shapefiles]
+    features = [read_shapefile(shapefile)
+                for shapefile in shapefiles]
     features_gdf = pd.concat(features, ignore_index=True)
     features_gdf = features_gdf.to_crs(CRS)
 
@@ -469,7 +474,6 @@ def cleanup_and_merge_features(feature, buffer_distance):
     """
     # Preserve original string columns
     original_strings = feature.select_dtypes(include=['object'])
-
     # Geometry manipulation
     feature = (feature
                .assign(geometry=lambda x: x.geometry.buffer(buffer_distance))
@@ -859,25 +863,34 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     protected_area_features = protected_area_features.sort_values(
         by='prot_cons', ascending=False)
 
-    # debug(protected_area_features, 'protected_area_features')
-    # debug(construction_feature, 'construction_feature')
-    # debug(buffers[0], 'buffer_1')
-    # debug(scope)
-    # Calculate intersections for each buffer zone
-    changing_feature_B1_intersection = calculate_intersection_area(
-        construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
+    # Initialize an empty DataFrame to store the features
+    features = pd.DataFrame()
 
-    # Calculate intersection for buffer B2
-    changing_feature_B2_intersection = calculate_intersection_area(
-        construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, scope)
+    # Check if there is a '<100' buffer
+    if not buffers[0].empty:
+        changing_feature_B1_intersection = calculate_intersection_area(
+            construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
+        features = pd.concat(
+            [features, changing_feature_B1_intersection], ignore_index=True)
 
-    # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
-    changing_feature_B2_not_B1 = calculate_overlay(
-        changing_feature_B2_intersection, changing_feature_B1_intersection, 'difference')
+    # Check if there is a '>100<625' buffer
+    if len(buffers) > 1 and not buffers[1].empty:
+        changing_feature_B2_intersection = calculate_intersection_area(
+            construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, scope)
+        # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
+        if not features.empty:
+            changing_feature_B2_not_B1 = calculate_overlay(
+                changing_feature_B2_intersection, features, 'difference')
+            features = pd.concat(
+                [features, changing_feature_B2_not_B1], ignore_index=True)
 
     # Calculate area outside B2 by taking the difference between the construction feature and buffer B2
-    changing_feature_outside_B2 = calculate_overlay(
-        construction_feature, buffers[1], 'difference')
+    if len(buffers) > 1 and not buffers[1].empty:
+        changing_feature_outside_B2 = calculate_overlay(
+            construction_feature, buffers[1], 'difference')
+    else:
+        changing_feature_outside_B2 = construction_feature.copy()
+
     changing_feature_outside_B2 = process_geodataframe_overlaps(
         changing_feature_outside_B2, protected_area_features)
     changing_feature_outside_B2 = add_lagefaktor_values(
@@ -886,8 +899,8 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
         scope, changing_feature_outside_B2)
     changing_feature_outside_B2['buffer_dis'] = BUFFER_DISTANCES['>625']
 
-    features = pd.concat([changing_feature_B1_intersection, changing_feature_B2_not_B1,
-                          changing_feature_outside_B2], ignore_index=True)
+    features = pd.concat(
+        [features, changing_feature_outside_B2], ignore_index=True)
 
     return features
 
@@ -950,6 +963,36 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
 # ----> Output Shapefile Creation <----
 
 
+def merge_and_flatten_overlapping_geometries(gdf):
+    """
+    This function merges a GeoDataFrame by all columns except 'geometry' and
+    flattens overlapping geometries into a single geometry.
+
+    Parameters:
+    gdf (GeoDataFrame): The GeoDataFrame to merge.
+
+    Returns:
+    GeoDataFrame: The merged GeoDataFrame with flattened geometries.
+    """
+    # Exclude 'geometry' column for the dissolve operation
+    columns_to_dissolve_by = [col for col in gdf.columns if col != 'geometry']
+
+    # Dissolve the GeoDataFrame by all columns except 'geometry'
+    gdf = gdf.dissolve(by=columns_to_dissolve_by)
+
+    # Convert MultiPolygons to individual Polygons
+    gdf = gdf.geometry.explode()
+
+    # Create a new GeoDataFrame, keeping the original column values
+    gdf = gpd.GeoDataFrame(gdf, geometry='geometry')
+    gdf[columns_to_dissolve_by] = gdf.index.to_frame()[columns_to_dissolve_by]
+
+    # Reset the index
+    gdf = gdf.reset_index(drop=True)
+
+    return gdf
+
+
 def process_features(directory, feature_type, unchanged_features, changing_features, changing_values):
     """
     This function processes geospatial features from a given directory.
@@ -965,9 +1008,18 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     GeoDataFrame: The processed features.
     """
     features = get_features(directory)
+    # debug(features, 'features_before1', True)
     features = preprocess_features(features, feature_type)
+    # debug(features, 'features_after1', True)
+    pt(features, 'features_after1')
     features = process_and_overlay_features(
         features, unchanged_features, changing_features, changing_values)
+    pt(features, 'features_after2')
+    features = merge_and_flatten_overlapping_geometries(features)
+    pt(features, 'features_after3')
+    # count the polygons in features and print
+    # print(f"Number of polygons in features: {len(features)}")
+    # debug(features, 'features_after2', True)
     return features
 
 
@@ -1021,7 +1073,7 @@ def save_to_shapefile(features, filename):
                      driver='ESRI Shapefile')
 
 
-def create_plot(construction_features, compensation_features, interference, scope):
+def create_plot(construction_features, compensation_features, interference, scope, show_plot=True):
     """
     """
 
@@ -1120,7 +1172,8 @@ def create_plot(construction_features, compensation_features, interference, scop
     # write plot to file
     plt.savefig(os.path.join(OUTPUT_DIR, PROJECT_NAME +
                 '_plot.png'), dpi=600, bbox_inches='tight')
-    plt.show()
+    if show_plot:
+        plt.show()
 
 
 def write_output_json_and_excel(total_score, data, filename='output'):
@@ -1239,6 +1292,7 @@ construction_features = process_features(
 
 compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
+debug(compensatory_features, 'compensatory', True)
 
 protected_area_features = get_features(PROTECTED_DIR)
 protected_area_features = preprocess_features(
@@ -1247,11 +1301,6 @@ protected_area_features = preprocess_features(
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
-# debug(scope, 'scope')
-# debug(construction_features, 'construction_features')
-# debug(protected_area_features, 'protected_area_features')
-
-debug(buffers[2], 'buffers[2]')
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
