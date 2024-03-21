@@ -213,7 +213,7 @@ def show_plot(gdf, title):
     plt.show()
 
 
-def debug(gdf, prefix='', include_line_numbers=False):
+def debug(gdf, prefix='', show_plot=False, include_line_numbers=False):
     """
     This function writes a GeoDataFrame to a shapefile for debugging purposes.
 
@@ -255,7 +255,8 @@ def debug(gdf, prefix='', include_line_numbers=False):
 
         # Write the GeoDataFrame to a shapefile
         gdf.to_file(filename)
-        show_plot(gdf, prefix)
+        if show_plot:
+            show_plot(gdf, prefix)
 
 
 def pt(df, table_name=None):
@@ -1008,18 +1009,15 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     GeoDataFrame: The processed features.
     """
     features = get_features(directory)
-    # debug(features, 'features_before1', True)
+
     features = preprocess_features(features, feature_type)
-    # debug(features, 'features_after1', True)
-    pt(features, 'features_after1')
+
     features = process_and_overlay_features(
         features, unchanged_features, changing_features, changing_values)
-    pt(features, 'features_after2')
+
+    # why not use clean_and_merge_features? have to check the gesamten abläufe noch mal
     features = merge_and_flatten_overlapping_geometries(features)
-    pt(features, 'features_after3')
-    # count the polygons in features and print
-    # print(f"Number of polygons in features: {len(features)}")
-    # debug(features, 'features_after2', True)
+
     return features
 
 
@@ -1073,7 +1071,7 @@ def save_to_shapefile(features, filename):
                      driver='ESRI Shapefile')
 
 
-def create_plot(construction_features, compensation_features, interference, scope, show_plot=True):
+def create_plot(construction_features, compensation_features, interference, scope, show_plot=False):
     """
     """
 
@@ -1292,7 +1290,6 @@ construction_features = process_features(
 
 compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
-debug(compensatory_features, 'compensatory', True)
 
 protected_area_features = get_features(PROTECTED_DIR)
 protected_area_features = preprocess_features(
@@ -1317,6 +1314,7 @@ construction_feature_buffer_zones = process_and_separate_buffer_zones(
 # ---> Construction Output Shapefile Creation <---
 
 print()
+print(PROJECT_NAME)
 
 construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
@@ -1357,4 +1355,4 @@ write_output_json_and_excel(total_compensatory_score,
 
 
 create_plot(construction_feature_buffer_zones, compensatory_features,
-            interference, scope)
+            interference, scope, True)

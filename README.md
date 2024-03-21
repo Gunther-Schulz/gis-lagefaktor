@@ -102,12 +102,17 @@ The debug directory contains debug shape files that are used to visualize the in
 Total Construction score: 196167.92
 Total Compensatory score: 265845.5
 
+ohne Interference
+
+Total Construction score: 203695.58
+Total Compensatory score: 265845.5
+
 ### Friedrichshof
 
-Total Construction score: 160408.37
-Total Compensatory score: 31131.94
+Total Construction score: 160411.33
+Total Compensatory score: 31132.49
 
 ### Vorbeck
 
-Total Construction score: 247267.3
-Total Compensatory score: 281319.69
+Total Construction score: 251018.7
+Total Compensatory score: 273738.07
