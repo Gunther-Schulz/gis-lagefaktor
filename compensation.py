@@ -195,6 +195,23 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
 warnings.showwarning = custom_warning
 
 
+def show_plot(gdf, title):
+    """
+    This function shows a plot of a GeoDataFrame.
+
+    Parameters:
+    gdf (GeoDataFrame): The GeoDataFrame to plot.
+    title (str): The title of the plot.
+
+    Returns:
+    None
+    """
+    fig, ax = plt.subplots()
+    gdf.plot(ax=ax)
+    ax.set_title(title)  # Add this line to set the title
+    plt.show()
+
+
 def debug(gdf, prefix='', include_line_numbers=False):
     """
     This function writes a GeoDataFrame to a shapefile for debugging purposes.
@@ -237,6 +254,7 @@ def debug(gdf, prefix='', include_line_numbers=False):
 
         # Write the GeoDataFrame to a shapefile
         gdf.to_file(filename)
+        show_plot(gdf, prefix)
 
 
 def pt(df, table_name=None):
@@ -841,6 +859,10 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     protected_area_features = protected_area_features.sort_values(
         by='prot_cons', ascending=False)
 
+    # debug(protected_area_features, 'protected_area_features')
+    # debug(construction_feature, 'construction_feature')
+    # debug(buffers[0], 'buffer_1')
+    # debug(scope)
     # Calculate intersections for each buffer zone
     changing_feature_B1_intersection = calculate_intersection_area(
         construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
@@ -1009,6 +1031,7 @@ def create_plot(construction_features, compensation_features, interference, scop
     column_name = ''
     handles = []
     labels = []
+    plot_area = False
 
     if 'buffer_dis' in construction_features.columns:
         column_name = 'buffer_dis'
@@ -1020,6 +1043,11 @@ def create_plot(construction_features, compensation_features, interference, scop
         # Plot 'buffer_dis' with the colormap
         features_map = construction_features.plot(
             column=column_name, ax=ax, cmap=cmap, edgecolor='black', linewidth=0.5)
+
+        # Add area labels
+        if plot_area:
+            for x, y, label in zip(construction_features.geometry.centroid.x, construction_features.geometry.centroid.y, construction_features.geometry.area):
+                ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
 
         # Create a legend entry for each unique value in 'buffer_dis'
         buffer_dis_patches = [Patch(color=cmap(
@@ -1043,6 +1071,10 @@ def create_plot(construction_features, compensation_features, interference, scop
         compensation_features.plot(
             column=column_name, ax=ax, cmap=cmap, norm=norm, edgecolor='black', linewidth=0.5)
 
+        # Add area labels
+        if plot_area:
+            for x, y, label in zip(construction_features.geometry.centroid.x, construction_features.geometry.centroid.y, construction_features.geometry.area):
+                ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
         # Get the unique values in the column
         unique_values = compensation_features[column_name].unique()
 
@@ -1085,10 +1117,10 @@ def create_plot(construction_features, compensation_features, interference, scop
                loc='upper left', bbox_to_anchor=(1, 1))
 
     plt.title(PROJECT_NAME)
-    # plt.show()
     # write plot to file
     plt.savefig(os.path.join(OUTPUT_DIR, PROJECT_NAME +
-                '_plot.png'), dpi=300, bbox_inches='tight')
+                '_plot.png'), dpi=600, bbox_inches='tight')
+    plt.show()
 
 
 def write_output_json_and_excel(total_score, data, filename='output'):
@@ -1204,7 +1236,6 @@ changing_features = get_features(CHANGING_DIR)
 
 construction_features = process_features(
     CONSTRUCTION_DIR, 'construction', unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
-debug(construction_features, '1 construction_features')
 
 compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
@@ -1216,9 +1247,14 @@ protected_area_features = preprocess_features(
 compensatory_features = add_compensatory_value(
     compensatory_features, protected_area_features)
 
+# debug(scope, 'scope')
+# debug(construction_features, 'construction_features')
+# debug(protected_area_features, 'protected_area_features')
+
+debug(buffers[2], 'buffers[2]')
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
-debug(construction_feature_buffer_zones, '2 construction_feature_buffer_zones')
+
 
 # compensatory_features = merge_by_combination(
 #     compensatory_features, 'compensatory')
