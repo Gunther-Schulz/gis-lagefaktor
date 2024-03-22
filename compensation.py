@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
-from shapely.ops import unary_union
-from matplotlib.lines import Line2D
-import matplotlib.transforms as mtransforms
+
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.patches import Patch
-from matplotlib.legend import Legend
+
 import numpy as np
 from matplotlib.colors import ListedColormap
-import matplotlib.patches as mpatches
-import matplotlib.colors as mcolors
+
 import matplotlib.pyplot as plt
 import simplejson as sjson
 import inspect
@@ -24,6 +21,7 @@ import re
 import warnings
 import glob
 
+# Option für keine nebenflächen zusammenhögend bei kompensation die unter 2000qm sind ignorieren
 
 # Constants
 CRS = 'epsg:25833'
@@ -35,6 +33,8 @@ GRZ_FACTORS = {
 }
 # DEFAULT_SLIVER = 0.0001
 DEFAULT_SLIVER = 0.001
+
+COUNT_SAMLL_COMPENSATORY_IF_ADJECENT = False
 
 AREA_LIMIT = 1
 
@@ -213,7 +213,7 @@ def show_plot(gdf, title):
     plt.show()
 
 
-def debug(gdf, prefix='', show_plot=False, include_line_numbers=False):
+def debug(gdf, prefix='', show_plot_option=False, include_line_numbers=False):
     """
     This function writes a GeoDataFrame to a shapefile for debugging purposes.
 
@@ -254,8 +254,8 @@ def debug(gdf, prefix='', show_plot=False, include_line_numbers=False):
         filename += f"{prefix}_#{debug_counter_dict[calling_function]}.shp"
 
         # Write the GeoDataFrame to a shapefile
-        gdf.to_file(filename)
-        if show_plot:
+        # gdf.to_file(filename)
+        if show_plot_option:
             show_plot(gdf, prefix)
 
 
@@ -300,7 +300,10 @@ def pt(df, table_name=None):
     print('\033[0m')  # Reset color
 
     # Print a line of dashes
-    print('-' * (max_length + 1) * len(fixed_width_df.columns))
+    if pd.isnull(max_length):
+        print("max_length is NaN")
+    else:
+        print('-' * int((max_length + 1) * len(fixed_width_df.columns)))
 
     # Print each row with fixed width columns
     for index, row in fixed_width_df.iterrows():
@@ -386,13 +389,13 @@ def read_shapefile(file_path):
     representing the encoded name of the shapefile's parent directory.
     """
     s_name = os.path.basename(os.path.dirname(file_path))
-    encoded_s_name = normalize_string(s_name)
+    encoded_name = normalize_string(s_name)
     print(colored(
-        f"  {encoded_s_name}/{os.path.basename(file_path)}", 'yellow', attrs=['dark']))
+        f"  {encoded_name}/{os.path.basename(file_path)}", 'yellow', attrs=['dark']))
     feature = gpd.read_file(file_path)
     feature = feature.to_crs(CRS)
     feature = feature[['geometry']]
-    feature['name'] = encoded_s_name
+    feature['name'] = encoded_name
     return feature
 
 
@@ -416,8 +419,6 @@ def get_features(dir):
         gdf = gpd.GeoDataFrame(columns=['geometry', 'name'], crs=CRS)
         return gdf
 
-    # features = [cleanup_and_merge_features(read_shapefile(shapefile))
-    #             for shapefile in shapefiles]
     features = [read_shapefile(shapefile)
                 for shapefile in shapefiles]
     features_gdf = pd.concat(features, ignore_index=True)
@@ -715,9 +716,10 @@ def add_compensatory_value(compensatory_features, protected_area_features):
         lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
 
     # Add 'eligible' column
-    compensatory_features['eligible'] = compensatory_features.apply(
-        lambda row: row['geometry'].area > get_value_with_warning(
-            COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
+    if COUNT_SAMLL_COMPENSATORY_IF_ADJECENT == True:
+        compensatory_features['eligible'] = compensatory_features.apply(
+            lambda row: row['geometry'].area > get_value_with_warning(
+                COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
@@ -726,6 +728,13 @@ def add_compensatory_value(compensatory_features, protected_area_features):
         compensatory_features = process_geodataframe_overlaps(
             compensatory_features, protected_area_features)
         compensatory_features = compensatory_features.drop(columns='prot_cons')
+        compensatory_features = merge_and_flatten_overlapping_geometries(
+            compensatory_features)
+
+    if COUNT_SAMLL_COMPENSATORY_IF_ADJECENT == False:
+        compensatory_features['eligible'] = compensatory_features.apply(
+            lambda row: row['geometry'].area > get_value_with_warning(
+                COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
 
     return compensatory_features
 
@@ -921,10 +930,29 @@ def add_construction_score(features, grz):
     scores = []
     for _, feature in features.iterrows():
         area = feature.geometry.area
+        # print('Construction Feature:')
+        # print(f'Area: {round(area,2)}')
+        # print()
+
         total_value = feature['base_value'] * feature['lagefaktor'] * area
+        # print(
+        #     f'Total Value: {feature["base_value"]} * {feature["lagefaktor"]} * {round(area,2)} = {round(total_value,2)}')
+        # print()
+
         factor_a, factor_b, factor_c = GRZ_FACTORS[grz]
+        # print(f'Factors: {factor_a}, {factor_b}, {factor_c}')
+        # print()
+
         total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
+        # print(
+        #     f'Total Value Adjusted: {round(total_value,2)} * {factor_a} * ({factor_b} + {factor_c}) = {round(total_value_adjusted,2)}')
+        # print()
+
         score = round(total_value_adjusted, 2)
+        # print(f'Score: {score}')
+        # print()
+        # print()
+
         scores.append(score)
 
     features['score'] = scores
@@ -976,21 +1004,34 @@ def merge_and_flatten_overlapping_geometries(gdf):
     GeoDataFrame: The merged GeoDataFrame with flattened geometries.
     """
     # Exclude 'geometry' column for the dissolve operation
+    # Fill NaN values with a common value
+    gdf = gdf.fillna("missing")
+
     columns_to_dissolve_by = [col for col in gdf.columns if col != 'geometry']
+    # pt(gdf, 'before_dissolve')
+    # debug(gdf, 'before_dissolve', show_plot_option=True)
 
     # Dissolve the GeoDataFrame by all columns except 'geometry'
     gdf = gdf.dissolve(by=columns_to_dissolve_by)
 
+    # pt(gdf, 'after_dissolve')
+    # print(gdf)
+    # pt(gdf, 'after_dissolve')
+    # debug(gdf, 'after_dissolve', show_plot_option=True)
     # Convert MultiPolygons to individual Polygons
     gdf = gdf.geometry.explode()
-
+    # debug(gdf, 'after_explode', show_plot_option=True)
     # Create a new GeoDataFrame, keeping the original column values
     gdf = gpd.GeoDataFrame(gdf, geometry='geometry')
+    # debug(gdf, 'after_gdf', show_plot_option=True)
     gdf[columns_to_dissolve_by] = gdf.index.to_frame()[columns_to_dissolve_by]
-
+    # debug(gdf, 'after_columns', show_plot_option=True)
     # Reset the index
     gdf = gdf.reset_index(drop=True)
+    # debug(gdf, 'after_reset', show_plot_option=True)
 
+    gdf = gdf.replace("missing", np.nan)
+    # pt(gdf, 'after_reset')
     return gdf
 
 
@@ -1032,12 +1073,21 @@ def calculate_compensatory_score(row, current_features):
     Returns:
     float: The compensatory score.
     """
+
+    # Hendrik S., [22. Mar 2024 at 11:34:04]:
+    # =Fläche*1*1,25
+
+    # =Fläche*0,5*0,2+Fläche*0,5*0,6
+
     if row['eligible'] == True:
         final_v = (row['compensat'] - row['base_value']) * row.geometry.area
         if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
-            final_v = final_v * \
-                get_value_with_warning(
-                    COMPENSATORY_PROTECTED_VALUES, row['prot_name'])
+            prot_value = get_value_with_warning(
+                COMPENSATORY_PROTECTED_VALUES, row['prot_name'])
+        else:
+            prot_value = 1
+
+        final_v = final_v * prot_value
         return final_v
     else:
         return 0
@@ -1058,6 +1108,8 @@ def add_compensatory_score(features, scope):
     for file in features['name'].unique():
         current_features = filter_features(
             scope, features[features['name'] == file])
+        # print('Compensatory')
+        # pt(current_features, 'current_featuresx')
         current_features['score'] = round(current_features.apply(
             lambda row: calculate_compensatory_score(row, current_features), axis=1), 2)
         all_features = pd.concat([all_features, current_features])
@@ -1256,23 +1308,23 @@ def filter_area_limit(gdf, limit):
     return gdf[gdf.geometry.area > limit]
 
 
-def merge_by_combination(gdf, type):
-    """
+# def merge_by_combination(gdf, type):
+#     """
 
-    """
-    # Check if type is 'construction'
-    if type == 'construction':
-        by_cols = ['name', 'base_name', 'lagefaktor', 'buffer_dis']
-        if 'prot_cons' in gdf.columns:
-            by_cols.append('prot_cons')
-        gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
-    # Check if type is 'compensatory'
-    elif type == 'compensatory':
-        by_cols = ['base_name', 'name', 'compensat']
-        if 'prot_comp' in gdf.columns:
-            by_cols.append('prot_comp')
-        gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
-    return gdf
+#     """
+#     # Check if type is 'construction'
+#     if type == 'construction':
+#         by_cols = ['name', 'base_name', 'lagefaktor', 'buffer_dis']
+#         if 'prot_cons' in gdf.columns:
+#             by_cols.append('prot_cons')
+#         gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
+#     # Check if type is 'compensatory'
+#     elif type == 'compensatory':
+#         by_cols = ['base_name', 'name', 'compensat']
+#         if 'prot_comp' in gdf.columns:
+#             by_cols.append('prot_comp')
+#         gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
+#     return gdf
 
 
 # ----> Main Logic Flow <----
@@ -1355,4 +1407,4 @@ write_output_json_and_excel(total_compensatory_score,
 
 
 create_plot(construction_feature_buffer_zones, compensatory_features,
-            interference, scope, True)
+            interference, scope, False)
