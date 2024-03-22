@@ -254,7 +254,7 @@ def debug(gdf, prefix='', show_plot_option=False, include_line_numbers=False):
         filename += f"{prefix}_#{debug_counter_dict[calling_function]}.shp"
 
         # Write the GeoDataFrame to a shapefile
-        # gdf.to_file(filename)
+        gdf.to_file(filename)
         if show_plot_option:
             show_plot(gdf, prefix)
 
@@ -399,6 +399,38 @@ def read_shapefile(file_path):
     return feature
 
 
+def clean_geometries(gdf):
+    invalid_geometries = gdf[~gdf.geometry.is_valid]
+    if not invalid_geometries.empty:
+        print(colored('Warning: Invalid geometries found. Cleaning...', 'red'))
+
+        # Create a figure with 2 subplots
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+
+        # Plot invalid geometries
+        invalid_geometries.plot(ax=axs[0], color='red')
+        axs[0].set_title('Invalid Geometries')
+
+        # Clean geometries
+        gdf['geometry'] = gdf.geometry.buffer(0)
+
+        # Plot valid geometries
+        gdf.plot(ax=axs[1], color='green')
+
+        # Highlight previously invalid geometries
+        previously_invalid = gdf.loc[invalid_geometries.index.intersection(
+            gdf.index)]
+        previously_invalid.plot(ax=axs[1], color='red')
+
+        axs[1].set_title('Valid Geometries (Previously Invalid in Blue)')
+
+        # Show the plots
+        plt.tight_layout()
+        plt.show()
+
+    return gdf
+
+
 def get_features(dir):
     """
     This function reads shapefiles from a given directory and returns a GeoDataFrame of the features.
@@ -421,10 +453,10 @@ def get_features(dir):
 
     features = [read_shapefile(shapefile)
                 for shapefile in shapefiles]
-    features_gdf = pd.concat(features, ignore_index=True)
-    features_gdf = features_gdf.to_crs(CRS)
+    gdf = pd.concat(features, ignore_index=True)
+    gdf = gdf.to_crs(CRS)
 
-    return features_gdf
+    return gdf
 
 # ----> Buffer Operations <----
 
@@ -461,40 +493,6 @@ def get_buffers(features, distances):
     return [create_buffer(features, distance) for distance in distances]
 
 # ----> Feature Cleanup and Geometry Manipulation <----
-
-
-def cleanup_and_merge_features(feature, buffer_distance):
-    """
-    Cleans up and merges features based on their geometry and 'name'.
-
-    Parameters:
-    - feature: GeoDataFrame to be processed.
-    - buffer_distance: Distance for buffering operations.
-
-    Returns:
-    - GeoDataFrame with merged features.
-    """
-    # Preserve original string columns
-    original_strings = feature.select_dtypes(include=['object'])
-    # Geometry manipulation
-    feature = (feature
-               .assign(geometry=lambda x: x.geometry.buffer(buffer_distance))
-               .explode(index_parts=False)
-               .assign(geometry=lambda x: x.geometry.buffer(-buffer_distance))
-               .loc[lambda x: x.geometry.geom_type == 'Polygon']
-               .dissolve(by='name')
-               .reset_index())
-
-    # Set the CRS
-    feature.crs = CRS
-
-    # Merge with original string columns
-    original_strings = original_strings.loc[feature.index].reset_index(
-        drop=True)
-    original_strings.drop(columns='name', inplace=True)
-    merged_features = pd.concat([feature, original_strings], axis=1)
-
-    return merged_features
 
 
 def resolve_overlaps(feature):
@@ -551,6 +549,41 @@ def remove_slivers(gdf, buffer_distance=DEFAULT_SLIVER):
 # ----> Feature Processing and Transformation <----
 
 
+# def cleanup_and_merge_features(feature, buffer_distance):
+#     """
+#     Cleans up and merges features based on their geometry and 'name'.
+
+#     Parameters:
+#     - feature: GeoDataFrame to be processed.
+#     - buffer_distance: Distance for buffering operations.
+
+#     Returns:
+#     - GeoDataFrame with merged features.
+#     """
+#     # Preserve original string columns
+#     original_strings = feature.select_dtypes(include=['object'])
+#     # Geometry manipulation
+#     # debug(feature, 'before_cleanup', show_plot_option=True)
+#     feature = (feature
+#                .assign(geometry=lambda x: x.geometry.buffer(buffer_distance))
+#                .explode(index_parts=False)
+#                .assign(geometry=lambda x: x.geometry.buffer(-buffer_distance))
+#                .loc[lambda x: x.geometry.geom_type == 'Polygon']
+#                .dissolve(by='name')
+#                .reset_index())
+#     # debug(feature, 'after_cleanup', show_plot_option=True)
+#     # Set the CRS
+#     feature.crs = CRS
+
+#     # Merge with original string columns
+#     original_strings = original_strings.loc[feature.index].reset_index(
+#         drop=True)
+#     original_strings.drop(columns='name', inplace=True)
+#     merged_features = pd.concat([feature, original_strings], axis=1)
+
+#     return merged_features
+
+
 def preprocess_features(features, feature_type, buffer_distance=10):
     """
     Generalized function to preprocess different types of features.
@@ -563,9 +596,15 @@ def preprocess_features(features, feature_type, buffer_distance=10):
     Returns:
     - Processed GeoDataFrame.
     """
-    # Cleanup and merge features
-    processed_features = cleanup_and_merge_features(
-        features, buffer_distance=buffer_distance)
+    # # Cleanup and merge features
+    # processed_features = cleanup_and_merge_features(
+    #     features, buffer_distance=buffer_distance)
+
+    features = clean_geometries(features)
+    processed_features = merge_and_flatten_overlapping_geometries(
+        features)
+
+    # processed_features = features
 
     if feature_type == 'compensatory':
         # Assign 'compensat' based on 'name'
@@ -579,6 +618,7 @@ def preprocess_features(features, feature_type, buffer_distance=10):
             lambda x: get_value_with_warning(COMPENSATORY_PROTECTED_VALUES, x))
         processed_features = processed_features.rename(
             columns={'name': 'prot_name'})
+
     return processed_features
 
 
@@ -610,8 +650,9 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
         base_features, changing_features, how='intersection')
 
     # Select only the columns from base_features and add 'base_name'
-    intersected_features = intersected_features[base_features.columns]
-    intersected_features['base_name'] = changing_features['base_name']
+    # intersected_features = intersected_features[base_features.columns]
+
+    # intersected_features['base_name'] = changing_features['base_name']
 
     # # Flatten the result into a single geometry and keep the first unique value for each group
     # base_features = intersected_features.dissolve(
@@ -850,7 +891,7 @@ def calculate_intersection_area(construction_feature, buffer, buffer_distance, p
         intersection, protected_area_features)
     intersection = add_lagefaktor_values(
         intersection, CONSTRUCTION_LAGEFAKTOR_VALUES[buffer_distance])
-    intersection = filter_features(scope, intersection)
+    # intersection = filter_features(scope, intersection)
     intersection['buffer_dis'] = buffer_distance
     return intersection
 
@@ -893,6 +934,7 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
                 changing_feature_B2_intersection, features, 'difference')
             features = pd.concat(
                 [features, changing_feature_B2_not_B1], ignore_index=True)
+        # debug(construction_feature, 'construction_feature', show_plot_option=True)
 
     # Calculate area outside B2 by taking the difference between the construction feature and buffer B2
     if len(buffers) > 1 and not buffers[1].empty:
@@ -900,13 +942,12 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
             construction_feature, buffers[1], 'difference')
     else:
         changing_feature_outside_B2 = construction_feature.copy()
-
     changing_feature_outside_B2 = process_geodataframe_overlaps(
         changing_feature_outside_B2, protected_area_features)
     changing_feature_outside_B2 = add_lagefaktor_values(
         changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES[BUFFER_DISTANCES['>625']])
-    changing_feature_outside_B2 = filter_features(
-        scope, changing_feature_outside_B2)
+    # changing_feature_outside_B2 = filter_features(
+    #     scope, changing_feature_outside_B2)
     changing_feature_outside_B2['buffer_dis'] = BUFFER_DISTANCES['>625']
 
     features = pd.concat(
@@ -930,29 +971,13 @@ def add_construction_score(features, grz):
     scores = []
     for _, feature in features.iterrows():
         area = feature.geometry.area
-        # print('Construction Feature:')
-        # print(f'Area: {round(area,2)}')
-        # print()
 
         total_value = feature['base_value'] * feature['lagefaktor'] * area
-        # print(
-        #     f'Total Value: {feature["base_value"]} * {feature["lagefaktor"]} * {round(area,2)} = {round(total_value,2)}')
-        # print()
 
         factor_a, factor_b, factor_c = GRZ_FACTORS[grz]
-        # print(f'Factors: {factor_a}, {factor_b}, {factor_c}')
-        # print()
 
         total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
-        # print(
-        #     f'Total Value Adjusted: {round(total_value,2)} * {factor_a} * ({factor_b} + {factor_c}) = {round(total_value_adjusted,2)}')
-        # print()
-
         score = round(total_value_adjusted, 2)
-        # print(f'Score: {score}')
-        # print()
-        # print()
-
         scores.append(score)
 
     features['score'] = scores
@@ -1003,35 +1028,29 @@ def merge_and_flatten_overlapping_geometries(gdf):
     Returns:
     GeoDataFrame: The merged GeoDataFrame with flattened geometries.
     """
-    # Exclude 'geometry' column for the dissolve operation
+
     # Fill NaN values with a common value
     gdf = gdf.fillna("missing")
 
+    # Exclude 'geometry' column for the dissolve operation
     columns_to_dissolve_by = [col for col in gdf.columns if col != 'geometry']
-    # pt(gdf, 'before_dissolve')
-    # debug(gdf, 'before_dissolve', show_plot_option=True)
 
     # Dissolve the GeoDataFrame by all columns except 'geometry'
     gdf = gdf.dissolve(by=columns_to_dissolve_by)
 
-    # pt(gdf, 'after_dissolve')
-    # print(gdf)
-    # pt(gdf, 'after_dissolve')
-    # debug(gdf, 'after_dissolve', show_plot_option=True)
     # Convert MultiPolygons to individual Polygons
     gdf = gdf.geometry.explode()
-    # debug(gdf, 'after_explode', show_plot_option=True)
+
     # Create a new GeoDataFrame, keeping the original column values
     gdf = gpd.GeoDataFrame(gdf, geometry='geometry')
-    # debug(gdf, 'after_gdf', show_plot_option=True)
     gdf[columns_to_dissolve_by] = gdf.index.to_frame()[columns_to_dissolve_by]
-    # debug(gdf, 'after_columns', show_plot_option=True)
+
     # Reset the index
     gdf = gdf.reset_index(drop=True)
-    # debug(gdf, 'after_reset', show_plot_option=True)
 
+    # Replace 'missing' values with NaN
     gdf = gdf.replace("missing", np.nan)
-    # pt(gdf, 'after_reset')
+
     return gdf
 
 
@@ -1050,13 +1069,13 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     GeoDataFrame: The processed features.
     """
     features = get_features(directory)
+    features = filter_features(scope, features)
 
     features = preprocess_features(features, feature_type)
-
     features = process_and_overlay_features(
         features, unchanged_features, changing_features, changing_values)
 
-    # why not use clean_and_merge_features? have to check the gesamten abläufe noch mal
+    # TODO: Can I merge function below somehow with function clean_and_merge_features?
     features = merge_and_flatten_overlapping_geometries(features)
 
     return features
@@ -1104,12 +1123,12 @@ def add_compensatory_score(features, scope):
     Returns:
     GeoDataFrame: The features with added compensatory scores.
     """
+
+    # =Fläche*3*1,1
+
     all_features = pd.DataFrame()
     for file in features['name'].unique():
-        current_features = filter_features(
-            scope, features[features['name'] == file])
-        # print('Compensatory')
-        # pt(current_features, 'current_featuresx')
+        current_features = features[features['name'] == file]
         current_features['score'] = round(current_features.apply(
             lambda row: calculate_compensatory_score(row, current_features), axis=1), 2)
         all_features = pd.concat([all_features, current_features])
@@ -1307,26 +1326,6 @@ def filter_area_limit(gdf, limit):
     """
     return gdf[gdf.geometry.area > limit]
 
-
-# def merge_by_combination(gdf, type):
-#     """
-
-#     """
-#     # Check if type is 'construction'
-#     if type == 'construction':
-#         by_cols = ['name', 'base_name', 'lagefaktor', 'buffer_dis']
-#         if 'prot_cons' in gdf.columns:
-#             by_cols.append('prot_cons')
-#         gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
-#     # Check if type is 'compensatory'
-#     elif type == 'compensatory':
-#         by_cols = ['base_name', 'name', 'compensat']
-#         if 'prot_comp' in gdf.columns:
-#             by_cols.append('prot_comp')
-#         gdf = gdf.dissolve(by=by_cols, aggfunc='first').reset_index()
-#     return gdf
-
-
 # ----> Main Logic Flow <----
 
 
@@ -1335,7 +1334,9 @@ buffers = get_buffers(interference, BUFFER_GEN_DISTANCES)
 scope = get_features(SCOPE_DIR)
 
 unchanging_features = get_features(UNCHANGING_DIR)
+unchanging_features = filter_features(scope, unchanging_features)
 changing_features = get_features(CHANGING_DIR)
+changing_features = filter_features(scope, changing_features)
 
 construction_features = process_features(
     CONSTRUCTION_DIR, 'construction', unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
@@ -1344,6 +1345,7 @@ compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
 
 protected_area_features = get_features(PROTECTED_DIR)
+protected_area_features = filter_features(scope, protected_area_features)
 protected_area_features = preprocess_features(
     protected_area_features, 'protected_area')
 
@@ -1352,16 +1354,6 @@ compensatory_features = add_compensatory_value(
 
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
-
-
-# compensatory_features = merge_by_combination(
-#     compensatory_features, 'compensatory')
-# compensatory_features = filter_area_limit(compensatory_features, 10)
-
-# construction_feature_buffer_zones = merge_by_combination(
-#     construction_feature_buffer_zones, 'construction')
-# construction_feature_buffer_zones = filter_area_limit(
-#     construction_feature_buffer_zones, 10)
 
 # ---> Construction Output Shapefile Creation <---
 
@@ -1377,8 +1369,8 @@ print(colored(
     f"Total Construction score: {total_construction_score}", 'yellow'))
 
 for file in construction_feature_buffer_zones['name'].unique():
-    current_features = filter_features(
-        scope, construction_feature_buffer_zones[construction_feature_buffer_zones['name'] == file])
+    current_features = construction_feature_buffer_zones[
+        construction_feature_buffer_zones['name'] == file]
     check_and_warn_column_length(current_features)
     save_to_shapefile(
         current_features, 'Construction_' + file)
@@ -1396,8 +1388,7 @@ print(colored(
     f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
 
 for file in compensatory_features['name'].unique():
-    current_features = filter_features(
-        scope, compensatory_features[compensatory_features['name'] == file])
+    current_features = compensatory_features[compensatory_features['name'] == file]
     check_and_warn_column_length(current_features)
     save_to_shapefile(
         current_features, 'Compensatory_' + file)
