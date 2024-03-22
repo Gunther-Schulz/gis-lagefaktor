@@ -374,29 +374,6 @@ def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=25
             if too_long.any():
                 warnings.warn(
                     f"Warning: Some values in column '{column_name}' exceed the limit of {value_length_limit}.")
-# ----> Feature Retrieval and Initialization <----
-
-
-def read_shapefile(file_path):
-    """
-    This function reads a shapefile from a given file path, transforms its CRS, and adds an encoded name column.
-
-    Parameters:
-    file_path (str): The file path from which to read the shapefile.
-
-    Returns:
-    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 'name' column 
-    representing the encoded name of the shapefile's parent directory.
-    """
-    s_name = os.path.basename(os.path.dirname(file_path))
-    encoded_name = normalize_string(s_name)
-    print(colored(
-        f"  {encoded_name}/{os.path.basename(file_path)}", 'yellow', attrs=['dark']))
-    feature = gpd.read_file(file_path)
-    feature = feature.to_crs(CRS)
-    feature = feature[['geometry']]
-    feature['name'] = encoded_name
-    return feature
 
 
 def clean_geometries(gdf):
@@ -422,13 +399,35 @@ def clean_geometries(gdf):
             gdf.index)]
         previously_invalid.plot(ax=axs[1], color='red')
 
-        axs[1].set_title('Valid Geometries (Previously Invalid in Blue)')
+        axs[1].set_title('Cleaned Geometries (Previously Invalid in Red)')
 
         # Show the plots
         plt.tight_layout()
         plt.show()
 
     return gdf
+
+
+def read_shapefile(file_path):
+    """
+    This function reads a shapefile from a given file path, transforms its CRS, and adds an encoded name column.
+
+    Parameters:
+    file_path (str): The file path from which to read the shapefile.
+
+    Returns:
+    GeoDataFrame: A GeoDataFrame containing the features from the shapefile, with an additional 'name' column 
+    representing the encoded name of the shapefile's parent directory.
+    """
+    s_name = os.path.basename(os.path.dirname(file_path))
+    encoded_name = normalize_string(s_name)
+    print(colored(
+        f"  {encoded_name}/{os.path.basename(file_path)}", 'yellow', attrs=['dark']))
+    feature = gpd.read_file(file_path)
+    feature = feature.to_crs(CRS)
+    feature = feature[['geometry']]
+    feature['name'] = encoded_name
+    return feature
 
 
 def get_features(dir):
@@ -457,8 +456,6 @@ def get_features(dir):
     gdf = gdf.to_crs(CRS)
 
     return gdf
-
-# ----> Buffer Operations <----
 
 
 def create_buffer(linestrings, distance):
@@ -491,8 +488,6 @@ def get_buffers(features, distances):
     """
     # Create a buffer for each distance and return the list of buffers
     return [create_buffer(features, distance) for distance in distances]
-
-# ----> Feature Cleanup and Geometry Manipulation <----
 
 
 def resolve_overlaps(feature):
@@ -545,8 +540,6 @@ def remove_slivers(gdf, buffer_distance=DEFAULT_SLIVER):
         buffer_distance).buffer(-buffer_distance)
     gdf.crs = CRS
     return gdf
-
-# ----> Feature Processing and Transformation <----
 
 
 # def cleanup_and_merge_features(feature, buffer_distance):
@@ -709,8 +702,6 @@ def filter_features(scope, features):
         ]
     return features
 
-# ----> Value Assignment and Aggregation <----
-
 
 def add_lagefaktor_values(feature, lagefaktor_value):
     """
@@ -868,8 +859,6 @@ def consolidate_columns(feature):
 
     return feature
 
-# ----> Feature Separation and Finalization <----
-
 
 def calculate_intersection_area(construction_feature, buffer, buffer_distance, protected_area_features, scope):
     """
@@ -1013,8 +1002,6 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
     scope.crs = CRS
 
     return scope
-
-# ----> Output Shapefile Creation <----
 
 
 def merge_and_flatten_overlapping_geometries(gdf):
