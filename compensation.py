@@ -34,9 +34,12 @@ GRZ_FACTORS = {
 # DEFAULT_SLIVER = 0.0001
 DEFAULT_SLIVER = 0.001
 
+FILTER_SMALL_AREAS = True
+FILTER_SMALL_AREAS_LIMIT = 1
+
 COUNT_SAMLL_COMPENSATORY_IF_ADJECENT = False
 
-AREA_LIMIT = 1
+# AREA_LIMIT = 1
 
 # Create the parser
 parser = argparse.ArgumentParser(
@@ -374,6 +377,29 @@ def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=25
             if too_long.any():
                 warnings.warn(
                     f"Warning: Some values in column '{column_name}' exceed the limit of {value_length_limit}.")
+
+
+def remove_geometries_with_small_areas(gdf, area_limit=FILTER_SMALL_AREAS_LIMIT):
+    """
+    This function checks for geometries with zero area in a GeoDataFrame.
+
+    Parameters:
+    gdf (GeoDataFrame): The GeoDataFrame to check.
+
+    Returns:
+    GeoDataFrame: The GeoDataFrame with geometries with zero area removed.
+    """
+    zero_area = gdf[gdf.geometry.area <= area_limit]
+    if not zero_area.empty:
+        areas = zero_area.geometry.area.tolist()
+        print(colored(
+            f'Warning: Geometries with small area found: {areas}. Removing...', 'red'))
+        pt(zero_area, 'Zero Area Geometries')
+        # plot zero_area
+        zero_area.plot()
+        plt.show()
+        gdf = gdf[gdf.geometry.area > area_limit]
+    return gdf
 
 
 def clean_geometries(gdf):
@@ -1300,18 +1326,18 @@ def write_output_json_and_excel(total_score, data, filename='output'):
                 filename + '.xlsx'), index=False)
 
 
-def filter_area_limit(gdf, limit):
-    """
-    Filter out areas that are less than the given limit.
+# def filter_area_limit(gdf, limit):
+#     """
+#     Filter out areas that are less than the given limit.
 
-    Args:
-        gdf (GeoDataFrame): The GeoDataFrame to filter.
-        limit (float): The minimum area limit.
+#     Args:
+#         gdf (GeoDataFrame): The GeoDataFrame to filter.
+#         limit (float): The minimum area limit.
 
-    Returns:
-        GeoDataFrame: The filtered GeoDataFrame.
-    """
-    return gdf[gdf.geometry.area > limit]
+#     Returns:
+#         GeoDataFrame: The filtered GeoDataFrame.
+#     """
+#     return gdf[gdf.geometry.area > limit]
 
 # ----> Main Logic Flow <----
 
@@ -1341,6 +1367,13 @@ compensatory_features = add_compensatory_value(
 
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
+construction_feature_buffer_zones = remove_geometries_with_small_areas(
+    construction_feature_buffer_zones)
+
+construction_feature_buffer_zones = remove_geometries_with_small_areas(
+    construction_feature_buffer_zones)
+compensatory_features = remove_geometries_with_small_areas(
+    compensatory_features)
 
 # ---> Construction Output Shapefile Creation <---
 
