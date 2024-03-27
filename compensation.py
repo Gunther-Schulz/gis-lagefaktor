@@ -133,7 +133,10 @@ debug_counter_dict = {}
 
 def get_calling_function_name():
     """
-    Walk up the call stack and return the name of the first function found that is defined in the main script.
+    This function returns the name of the function in the main module from where this function was called.
+
+    Returns:
+    str: The name of the function in the main module from where this function was called, or None if the function was not called from the main module.
     """
     frame = inspect.currentframe()
 
@@ -151,7 +154,10 @@ def get_calling_function_name():
 
 def get_calling_line_number():
     """
-    Walk up the call stack and return the line number of the first call found that is defined in the main script.
+    This function returns the line number in the main module from where this function was called.
+
+    Returns:
+    int: The line number in the main module from where this function was called, or None if the function was not called from the main module.
     """
     frame = inspect.currentframe()
 
@@ -403,6 +409,15 @@ def remove_geometries_with_small_areas(gdf, area_limit=FILTER_SMALL_AREAS_LIMIT)
 
 
 def clean_geometries(gdf):
+    """
+    This function cleans invalid geometries in a GeoDataFrame and plots the invalid and cleaned geometries.
+
+    Parameters:
+    gdf (GeoDataFrame): The GeoDataFrame to clean.
+
+    Returns:
+    GeoDataFrame: The cleaned GeoDataFrame.
+    """
     invalid_geometries = gdf[~gdf.geometry.is_valid]
     if not invalid_geometries.empty:
         print(colored('Warning: Invalid geometries found. Cleaning...', 'red'))
@@ -1150,6 +1165,13 @@ def add_compensatory_score(features, scope):
 
 def save_to_shapefile(features, filename):
     """
+    This function saves a GeoDataFrame to a shapefile.
+
+    Parameters:
+    features (GeoDataFrame): The GeoDataFrame to save.
+    filename (str): The name of the shapefile.
+
+    The shapefile is saved in the OUTPUT_DIR directory.
     """
     features.to_file(os.path.join(OUTPUT_DIR, filename),
                      driver='ESRI Shapefile')
@@ -1157,6 +1179,14 @@ def save_to_shapefile(features, filename):
 
 def create_plot(construction_features, compensation_features, interference, scope, show_plot=False):
     """
+    This function creates a plot with different layers of geospatial data.
+
+    Parameters:
+    construction_features (GeoDataFrame): The construction features to plot.
+    compensation_features (GeoDataFrame): The compensation features to plot.
+    interference (GeoDataFrame): The interference features to plot.
+    scope (GeoDataFrame): The scope features to plot.
+    show_plot (bool): Whether to display the plot. Defaults to False.
     """
 
     # Assuming 'features' is a GeoDataFrame
@@ -1367,8 +1397,6 @@ compensatory_features = add_compensatory_value(
 
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
-construction_feature_buffer_zones = remove_geometries_with_small_areas(
-    construction_feature_buffer_zones)
 
 construction_feature_buffer_zones = remove_geometries_with_small_areas(
     construction_feature_buffer_zones)
