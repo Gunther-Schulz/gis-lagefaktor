@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import seaborn as sns
 from colorama import Fore
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.patches import Patch
@@ -1074,7 +1075,8 @@ def merge_and_flatten_overlapping_geometries(gdf):
     gdf = gdf.dissolve(by=columns_to_dissolve_by)
 
     # Convert MultiPolygons to individual Polygons
-    gdf = gdf.geometry.explode()
+    # TODO: Should be keep index_parts=True ?
+    gdf = gdf.geometry.explode(index_parts=True)
 
     # Create a new GeoDataFrame, keeping the original column values
     gdf = gpd.GeoDataFrame(gdf, geometry='geometry')
@@ -1204,33 +1206,47 @@ def create_plot(construction_features, compensation_features, interference, scop
     labels = []
     plot_area = False
 
-    if 'buffer_dis' in construction_features.columns:
+    # if 'buffer_dis' in construction_features.columns:
+
+    import colorsys
+
+    if not construction_features.empty and 'buffer_dis' in construction_features.columns and 'base_name' in construction_features.columns:
         column_name = 'buffer_dis'
+        buffer_dis_values = construction_features[column_name].unique()
 
-        # Define a colormap with enough colors for each unique value in 'buffer_dis'
-        cmap = ListedColormap(plt.cm.viridis(np.linspace(
-            0, 1, len(construction_features[column_name].unique()))))
+        # Define a base color for each unique value in 'buffer_dis'
+        base_colors = sns.color_palette("hsv", len(buffer_dis_values))
+        buffer_dis_to_color = {
+            buffer_dis: base_colors[i] for i, buffer_dis in enumerate(buffer_dis_values)}
 
-        # Plot 'buffer_dis' with the colormap
-        features_map = construction_features.plot(
-            column=column_name, ax=ax, cmap=cmap, edgecolor='black', linewidth=0.5)
+        # Plot 'buffer_dis' with the base color, using different shades for each 'base_name'
+        handles = []
+        labels = []
+        for buffer_dis, group in construction_features.groupby(column_name):
+            base_names = group['base_name'].unique()
+            # Create a colormap for each 'base_name' within the same 'buffer_dis'
+            base_color = buffer_dis_to_color[buffer_dis]
+            hue = colorsys.rgb_to_hsv(*base_color)[0]  # Get the hue component
+            cmap = sns.cubehelix_palette(
+                len(base_names), start=hue, dark=0.5, light=0.8)
+            base_name_to_color = {base_name: cmap[i]
+                                  for i, base_name in enumerate(base_names)}
+            for base_name, subgroup in group.groupby('base_name'):
+                subgroup.plot(
+                    ax=ax, color=base_name_to_color[base_name], edgecolor='black', linewidth=0.5)
+                # Add a legend entry for each unique 'base_name'
+                handles.append(Patch(color=base_name_to_color[base_name]))
+                labels.append(f"{buffer_dis} - {base_name}")
 
         # Add area labels
         if plot_area:
             for x, y, label in zip(construction_features.geometry.centroid.x, construction_features.geometry.centroid.y, construction_features.geometry.area):
                 ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
 
-        # Create a legend entry for each unique value in 'buffer_dis'
-        buffer_dis_patches = [Patch(color=cmap(
-            i), label=label) for i, label in enumerate(construction_features[column_name].unique())]
+        ax.legend(handles=handles, labels=labels, loc='best')
 
-        handles.append(Patch(facecolor='none', edgecolor='none',
-                       label='Störungsquellendistanz'))
-        handles.extend(buffer_dis_patches)
-        labels.append('Störungsquellendistanz')
-        labels.extend(construction_features[column_name].unique())
-
-    if 'compensat' in compensation_features.columns:
+    if not compensation_features.empty and 'compensat' in compensation_features.columns:
+        # if 'compensat' in compensation_features.columns:
         column_name = 'compensat'
         # Define the color map and norm
         colors = ['red', 'green', 'blue']  # replace with the colors you want
@@ -1259,29 +1275,31 @@ def create_plot(construction_features, compensation_features, interference, scop
         labels.append('Kompensationswert')
         labels.extend(unique_values)
 
-    # Plot 'interference' on the same axes
-    interference.plot(ax=ax, color='red')
+    if not interference.empty:
+        # Plot 'interference' on the same axes
+        interference.plot(ax=ax, color='red')
 
-    # Create a legend entry for 'interference'
-    interference_patch = Patch(color='red', label='Störungsquelle')
+        # Create a legend entry for 'interference'
+        interference_patch = Patch(color='red', label='Störungsquelle')
 
-    handles.append(
-        Patch(facecolor='none', edgecolor='none', label='Störungsquelle'))
-    handles.append(interference_patch)
-    labels.append('Störungsquelle')
-    labels.append('Störungsquelle')
+        handles.append(
+            Patch(facecolor='none', edgecolor='none', label='Störungsquelle'))
+        handles.append(interference_patch)
+        labels.append('')
+        labels.append('Störungsquelle')
 
-    # Plot 'scope' on the same axes with dashed lines and no fill
-    scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+    if not scope.empty:
+        # Plot 'scope' on the same axes with dashed lines and no fill
+        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
 
-    # Create a legend entry for 'scope'
-    scope_patch = Patch(color='black', label='Geltungsbereich', fill=False)
+        # Create a legend entry for 'scope'
+        scope_patch = Patch(color='black', label='Geltungsbereich', fill=False)
 
-    handles.append(
-        Patch(facecolor='none', edgecolor='none', label='Geltungsbereich'))
-    handles.append(scope_patch)
-    labels.append('Geltungsbereich')
-    labels.append('Geltungsbereich')
+        handles.append(
+            Patch(facecolor='none', edgecolor='none', label='Geltungsbereich'))
+        handles.append(scope_patch)
+        labels.append('')
+        labels.append('Geltungsbereich')
 
     # Create a single legend for all entries
     plt.legend(handles=handles, labels=labels,
