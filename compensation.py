@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from colorama import Fore
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.patches import Patch
 
@@ -303,9 +304,12 @@ def pt(df, table_name=None):
 
     # Print the column names with fixed width
     for i, name in enumerate(fixed_width_df.columns):
-        print(colors[i % len(colors)] +
-              name.ljust(max_length + 1, ' '), end='')
-
+        if not np.isnan(max_length):
+            print(colors[i % len(colors)] +
+                  name.ljust(int(max_length) + 1, ' '), end='')
+        else:
+            print("Problem: max_length is NaN")
+            # Handle the case when max_length is NaN
     print('\033[0m')  # Reset color
 
     # Print a line of dashes
@@ -487,9 +491,11 @@ def get_features(dir):
 
     if not shapefiles:
         print(
-            colored(f"No shapefiles found in directory {dir}", 'yellow', attrs=['dark']))
+            colored(f"No shapefiles found in directory {dir}. Make sure shapefiles are under a subdirectory with the name of the type. For example 'ProjectName/construction/" + Fore.RED + "Baufeld" + Fore.RESET + "/*.shp", 'yellow'))
         gdf = gpd.GeoDataFrame(columns=['geometry', 'name'], crs=CRS)
         return gdf
+    else:
+        print(colored(f"Found {len(shapefiles)} shapefiles:", 'green'))
 
     features = [read_shapefile(shapefile)
                 for shapefile in shapefiles]
@@ -804,10 +810,11 @@ def add_compensatory_value(compensatory_features, protected_area_features):
         compensatory_features = merge_and_flatten_overlapping_geometries(
             compensatory_features)
 
-    if COUNT_SAMLL_COMPENSATORY_IF_ADJECENT == False:
-        compensatory_features['eligible'] = compensatory_features.apply(
-            lambda row: row['geometry'].area > get_value_with_warning(
-                COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
+    if not compensatory_features.empty:
+        if COUNT_SAMLL_COMPENSATORY_IF_ADJECENT == False:
+            compensatory_features['eligible'] = compensatory_features.apply(
+                lambda row: row['geometry'].area > get_value_with_warning(
+                    COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
 
     return compensatory_features
 
@@ -1376,30 +1383,43 @@ interference = get_features(INTERFERENCE_DIR)
 buffers = get_buffers(interference, BUFFER_GEN_DISTANCES)
 scope = get_features(SCOPE_DIR)
 
+print("Processing unchanged features...")
 unchanging_features = get_features(UNCHANGING_DIR)
 unchanging_features = filter_features(scope, unchanging_features)
+print("Processing changing features...")
 changing_features = get_features(CHANGING_DIR)
 changing_features = filter_features(scope, changing_features)
 
+print("Processing construction features...")
 construction_features = process_features(
     CONSTRUCTION_DIR, 'construction', unchanging_features, changing_features, CHANGING_CONSTRUCTION_BASE_VALUES)
 
+print("Processing compensatory features...")
 compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
 
+print("Processing protected area features...")
 protected_area_features = get_features(PROTECTED_DIR)
 protected_area_features = filter_features(scope, protected_area_features)
 protected_area_features = preprocess_features(
     protected_area_features, 'protected_area')
 
-compensatory_features = add_compensatory_value(
-    compensatory_features, protected_area_features)
+print("Adding compensatory values...")
+if not compensatory_features.empty:
+    compensatory_features = add_compensatory_value(
+        compensatory_features, protected_area_features)
+else:
+    print("No compensatory features found.")
 
+print("Processing geometric scope: Creating buffer zones...")
 construction_feature_buffer_zones = process_and_separate_buffer_zones(
     scope, construction_features, buffers, protected_area_features)
 
+print("Processing geometric scope: Removing small areas from construction feature buffer zones...")
 construction_feature_buffer_zones = remove_geometries_with_small_areas(
     construction_feature_buffer_zones)
+
+print("Processing geometric scope: Removing small areas from compensatory features...")
 compensatory_features = remove_geometries_with_small_areas(
     compensatory_features)
 
@@ -1408,14 +1428,17 @@ compensatory_features = remove_geometries_with_small_areas(
 print()
 print(PROJECT_NAME)
 
+print("Calculating construction score...")
 construction_feature_buffer_zones = add_construction_score(
     construction_feature_buffer_zones, GRZ)
 
+print("Calculating compensatory score...")
 total_construction_score = round(
     construction_feature_buffer_zones['score'].sum(), 2)
 print(colored(
     f"Total Construction score: {total_construction_score}", 'yellow'))
 
+print("Creating output shapefiles...")
 for file in construction_feature_buffer_zones['name'].unique():
     current_features = construction_feature_buffer_zones[
         construction_feature_buffer_zones['name'] == file]
@@ -1423,27 +1446,36 @@ for file in construction_feature_buffer_zones['name'].unique():
     save_to_shapefile(
         current_features, 'Construction_' + file)
 
-
+print("Writing output JSON and Excel files...")
 write_output_json_and_excel(total_construction_score, construction_feature_buffer_zones,
                             'Construction')
 
 # ---> Compensatory Output Shapefile Creation <---
+# Check if the compensatory_features DataFrame is not empty
+if not compensatory_features.empty:
+    print("Calculating compensatory score...")
+    compensatory_features = add_compensatory_score(
+        compensatory_features, scope)
 
-compensatory_features = add_compensatory_score(compensatory_features, scope)
+    print("Creating output shapefiles...")
+    total_compensatory_score = round(compensatory_features['score'].sum(), 2)
+    print(colored(
+        f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
 
-total_compensatory_score = round(compensatory_features['score'].sum(), 2)
-print(colored(
-    f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
+    print("Writing output JSON and Excel files...")
+    for file in compensatory_features['name'].unique():
+        current_features = compensatory_features[compensatory_features['name'] == file]
+        check_and_warn_column_length(current_features)
+        save_to_shapefile(
+            current_features, 'Compensatory_' + file)
 
-for file in compensatory_features['name'].unique():
-    current_features = compensatory_features[compensatory_features['name'] == file]
-    check_and_warn_column_length(current_features)
-    save_to_shapefile(
-        current_features, 'Compensatory_' + file)
+    print("Writing output JSON and Excel files...")
+    write_output_json_and_excel(total_compensatory_score,
+                                compensatory_features, 'Compensatory')
+else:
+    print(colored(
+        "No compensatory features found. Skipping the rest of the Compensatory Output operations.", 'yellow'))
 
-write_output_json_and_excel(total_compensatory_score,
-                            compensatory_features, 'Compensatory')
-
-
+print("Creating plot...")
 create_plot(construction_feature_buffer_zones, compensatory_features,
-            interference, scope, False)
+            interference, scope, True)
