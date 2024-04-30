@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import json
 import seaborn as sns
 from colorama import Fore
 from matplotlib.colors import ListedColormap, BoundaryNorm
@@ -111,15 +112,19 @@ BUFFER_DISTANCES = {
     '>100<625': '>100<625',
     '>625': '>625'
 }
-CHANGING_CONSTRUCTION_BASE_VALUES = {
-    'Acker': 1, 'Grünland': 1, 'Weg': 1, 'weg': 1}
+
+calculation_values_file_path = os.path.join(
+    dir_path, 'calculation_values.json')
+with open(calculation_values_file_path, 'r') as f:
+    calculation_input_values = json.load(f)
+
+CHANGING_CONSTRUCTION_BASE_VALUES = calculation_input_values['changing_construction_base_values']
+CHANGING_COMPENSATORY_BASE_VALUES = calculation_input_values['changing_compensatory_base_values']
 
 CONSTRUCTION_LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1, '>625': 1.25}
 CONSTRUCTION_PROTECTED_VALUES = {
     'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.25, 'Test': 10, 'Test2': 20}
 
-# TODO:
-CHANGING_COMPENSATORY_BASE_VALUES = {'Acker': 0, 'Grünland': 0, 'weg': 0}
 COMPENSATORY_MEASURE_VALUES = {
     'Grünfläche': 3, "comp_test": 10}
 COMPENSATORY_MEASURE_MINIMUM_AREAS = {
