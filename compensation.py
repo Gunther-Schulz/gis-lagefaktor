@@ -120,17 +120,23 @@ with open(calculation_values_file_path, 'r') as f:
 
 CHANGING_CONSTRUCTION_BASE_VALUES = calculation_input_values['changing_construction_base_values']
 CHANGING_COMPENSATORY_BASE_VALUES = calculation_input_values['changing_compensatory_base_values']
+CONSTRUCTION_LAGEFAKTOR_VALUES = calculation_input_values['construction_lagefaktor_values']
+CONSTRUCTION_PROTECTED_VALUES = calculation_input_values['construction_protected_values']
 
-CONSTRUCTION_LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1, '>625': 1.25}
-CONSTRUCTION_PROTECTED_VALUES = {
-    'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.25, 'Test': 10, 'Test2': 20}
+COMPENSATORY_MEASURE_VALUES = calculation_input_values['compensatory_measure_values']
+COMPENSATORY_MEASURE_MINIMUM_AREAS = calculation_input_values['compensatory_measure_minimum_area']
+COMPENSATORY_PROTECTED_VALUES = calculation_input_values['compensatory_protected_values']
 
-COMPENSATORY_MEASURE_VALUES = {
-    'Grünfläche': 3, "comp_test": 10}
-COMPENSATORY_MEASURE_MINIMUM_AREAS = {
-    'Grünfläche': 2000, "comp_test": 100}
-COMPENSATORY_PROTECTED_VALUES = {
-    'VSG': 1.1, 'GGB': 1.1, 'Test': 2, 'Test2': 4}
+# CONSTRUCTION_LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1, '>625': 1.25}
+# CONSTRUCTION_PROTECTED_VALUES = {
+#     'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.25, 'Test': 10, 'Test2': 20}
+
+# COMPENSATORY_MEASURE_VALUES = {
+#     'Grünfläche': 3, "comp_test": 10}
+# COMPENSATORY_MEASURE_MINIMUM_AREAS = {
+#     'Grünfläche': 2000, "comp_test": 100}
+# COMPENSATORY_PROTECTED_VALUES = {
+#     'VSG': 1.1, 'GGB': 1.1, 'Test': 2, 'Test2': 4}
 
 PROJECT_NAME = args.project
 
@@ -360,6 +366,8 @@ def get_value_with_warning(values, key):
     Returns:
     The value associated with the key, or None if the key is not found.
     """
+    print(values)
+    print(key)
     normalized_key = normalize_string(key)
     normalized_values = {normalize_string(k): v for k, v in values.items()}
 
@@ -1420,6 +1428,8 @@ construction_features = process_features(
 print("Processing compensatory features...")
 compensatory_features = process_features(
     COMPENSATORY_DIR, 'compensatory', unchanging_features, changing_features, CHANGING_COMPENSATORY_BASE_VALUES)
+
+debug(compensatory_features, 'compensatory')
 
 print("Processing protected area features...")
 protected_area_features = get_features(PROTECTED_DIR)
