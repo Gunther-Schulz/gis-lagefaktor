@@ -124,12 +124,10 @@ CONSTRUCTION_LAGEFAKTOR_VALUES = calculation_input_values['construction_lagefakt
 CONSTRUCTION_PROTECTED_VALUES = calculation_input_values['construction_protected_values']
 
 COMPENSATORY_MEASURE_VALUES = calculation_input_values['compensatory_measure_values']
-COMPENSATORY_MEASURE_MINIMUM_AREAS = calculation_input_values['compensatory_measure_minimum_area']
+COMPENSATORY_MEASURE_MINIMUM_AREAS = calculation_input_values[
+    'compensatory_measure_minimum_area']
 COMPENSATORY_PROTECTED_VALUES = calculation_input_values['compensatory_protected_values']
 
-# CONSTRUCTION_LAGEFAKTOR_VALUES = {'<100': 0.75, '>100<625': 1, '>625': 1.25}
-# CONSTRUCTION_PROTECTED_VALUES = {
-#     'NSG': 1.5, 'VSG': 1.25, 'GGB': 1.25, 'Test': 10, 'Test2': 20}
 
 # COMPENSATORY_MEASURE_VALUES = {
 #     'Grünfläche': 3, "comp_test": 10}
@@ -366,8 +364,7 @@ def get_value_with_warning(values, key):
     Returns:
     The value associated with the key, or None if the key is not found.
     """
-    print(values)
-    print(key)
+
     normalized_key = normalize_string(key)
     normalized_values = {normalize_string(k): v for k, v in values.items()}
 
@@ -510,6 +507,10 @@ def get_features(dir):
         return gdf
     else:
         print(colored(f"Found {len(shapefiles)} shapefiles:", 'green'))
+    for shapefile in shapefiles:
+        feature = read_shapefile(shapefile)
+        for _, row in feature.iterrows():
+            print(f"File: {shapefile}, Area: {row['geometry'].area}")
 
     features = [read_shapefile(shapefile)
                 for shapefile in shapefiles]
@@ -1143,13 +1144,9 @@ def calculate_compensatory_score(row, current_features):
     float: The compensatory score.
     """
 
-    # Hendrik S., [22. Mar 2024 at 11:34:04]:
-    # =Fläche*1*1,25
-
-    # =Fläche*0,5*0,2+Fläche*0,5*0,6
-
     if row['eligible'] == True:
-        final_v = (row['compensat'] - row['base_value']) * row.geometry.area
+        final_v = (row['compensat'] - row['base_value']) * \
+            row.geometry.area * row['lagefaktor']
         if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
             prot_value = get_value_with_warning(
                 COMPENSATORY_PROTECTED_VALUES, row['prot_name'])
@@ -1174,8 +1171,7 @@ def add_compensatory_score(features, scope):
     GeoDataFrame: The features with added compensatory scores.
     """
 
-    # =Fläche*3*1,1
-
+    pt(features)
     all_features = pd.DataFrame()
     for file in features['name'].unique():
         current_features = features[features['name'] == file]
@@ -1290,10 +1286,10 @@ def create_plot(construction_features, compensation_features, interference, scop
 
     if not interference.empty:
         # Plot 'interference' on the same axes
-        interference.plot(ax=ax, color='red')
+        interference.plot(ax=ax, color='cyan')
 
         # Create a legend entry for 'interference'
-        interference_patch = Patch(color='red', label='Störungsquelle')
+        interference_patch = Patch(color='cyan', label='Störungsquelle')
 
         handles.append(
             Patch(facecolor='none', edgecolor='none', label='Störungsquelle'))
@@ -1302,11 +1298,10 @@ def create_plot(construction_features, compensation_features, interference, scop
         labels.append('Störungsquelle')
 
     if not scope.empty:
-        # Plot 'scope' on the same axes with dashed lines and no fill
         scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
 
-        # Create a legend entry for 'scope'
-        scope_patch = Patch(color='black', label='Geltungsbereich', fill=False)
+        scope_patch = Patch(
+            color='black', label='Geltungsbereich', linestyle='dashed', fill=False)
 
         handles.append(
             Patch(facecolor='none', edgecolor='none', label='Geltungsbereich'))
@@ -1437,6 +1432,22 @@ protected_area_features = filter_features(scope, protected_area_features)
 protected_area_features = preprocess_features(
     protected_area_features, 'protected_area')
 
+print("Processing geometric scope: Creating buffer zones for construction features...")
+construction_features = process_and_separate_buffer_zones(
+    scope, construction_features, buffers, protected_area_features)
+
+print("Processing geometric scope: Creating buffer zones for compensatory features...")
+compensatory_features = process_and_separate_buffer_zones(
+    scope, compensatory_features, buffers, protected_area_features)
+
+print("Processing geometric scope: Removing small areas from construction feature buffer zones...")
+construction_features = remove_geometries_with_small_areas(
+    construction_features)
+
+print("Processing geometric scope: Removing small areas from compensatory features...")
+compensatory_features = remove_geometries_with_small_areas(
+    compensatory_features)
+
 print("Adding compensatory values...")
 if not compensatory_features.empty:
     compensatory_features = add_compensatory_value(
@@ -1444,43 +1455,30 @@ if not compensatory_features.empty:
 else:
     print("No compensatory features found.")
 
-print("Processing geometric scope: Creating buffer zones...")
-construction_feature_buffer_zones = process_and_separate_buffer_zones(
-    scope, construction_features, buffers, protected_area_features)
-
-print("Processing geometric scope: Removing small areas from construction feature buffer zones...")
-construction_feature_buffer_zones = remove_geometries_with_small_areas(
-    construction_feature_buffer_zones)
-
-print("Processing geometric scope: Removing small areas from compensatory features...")
-compensatory_features = remove_geometries_with_small_areas(
-    compensatory_features)
-
 # ---> Construction Output Shapefile Creation <---
 
 print()
 print(PROJECT_NAME)
 
 print("Calculating construction score...")
-construction_feature_buffer_zones = add_construction_score(
-    construction_feature_buffer_zones, GRZ)
+construction_features = add_construction_score(
+    construction_features, GRZ)
 
-print("Calculating compensatory score...")
 total_construction_score = round(
-    construction_feature_buffer_zones['score'].sum(), 2)
+    construction_features['score'].sum(), 2)
 print(colored(
     f"Total Construction score: {total_construction_score}", 'yellow'))
 
 print("Creating output shapefiles...")
-for file in construction_feature_buffer_zones['name'].unique():
-    current_features = construction_feature_buffer_zones[
-        construction_feature_buffer_zones['name'] == file]
+for file in construction_features['name'].unique():
+    current_features = construction_features[
+        construction_features['name'] == file]
     check_and_warn_column_length(current_features)
     save_to_shapefile(
         current_features, 'Construction_' + file)
 
 print("Writing output JSON and Excel files...")
-write_output_json_and_excel(total_construction_score, construction_feature_buffer_zones,
+write_output_json_and_excel(total_construction_score, construction_features,
                             'Construction')
 
 # ---> Compensatory Output Shapefile Creation <---
@@ -1510,5 +1508,5 @@ else:
         "No compensatory features found. Skipping the rest of the Compensatory Output operations.", 'yellow'))
 
 print("Creating plot...")
-create_plot(construction_feature_buffer_zones, compensatory_features,
+create_plot(construction_features, compensatory_features,
             interference, scope, True)
