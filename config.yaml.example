@@ -1,0 +1,5 @@
+projects:
+  project1:
+    path: /path/to/project1
+  project2:
+    path: /path/to/project2

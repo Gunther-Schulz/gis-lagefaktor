@@ -1,0 +1,233 @@
+# -*- coding: utf-8 -*-
+
+
+import argparse
+from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length
+from gis_lagefaktor.feature_processing import process_features, add_compensatory_score, process_and_separate_buffer_zones
+from gis_lagefaktor.geospatial_ops import get_buffers, filter_features
+from gis_lagefaktor.visualization import create_plot
+import os
+import shutil
+import json
+import sys
+from gis_lagefaktor.debugging import do_debug, pt
+from gis_lagefaktor.custom_warning import custom_warning
+from gis_lagefaktor.feature_processing import preprocess_features
+from gis_lagefaktor.geospatial_ops import remove_geometries_with_small_areas
+from gis_lagefaktor.feature_processing import add_compensatory_value, add_construction_score
+from termcolor import colored
+import warnings
+import gis_lagefaktor.config as config
+
+warnings.showwarning = custom_warning
+
+if len(sys.argv) == 1:
+    print("No arguments provided. Please run the script with the required arguments.")
+    sys.exit()
+
+# # Constants
+# CRS = 'epsg:25833'
+# GRZ = '0.5'
+# DATA_DIR = './DATA'
+# GRZ_FACTORS = {
+#     '0.5': [0.5, 0.2, 0.6],
+#     '0.75': [0.75, 0.5, 0.8]
+# }
+# # DEFAULT_SLIVER = 0.0001
+# DEFAULT_SLIVER = 0.001
+
+# FILTER_SMALL_AREAS = True
+# FILTER_SMALL_AREAS_LIMIT = 1
+
+# COUNT_SAMLL_COMPENSATORY_IF_ADJECENT = False
+
+# AREA_LIMIT = 1
+
+# Create the parser
+parser = argparse.ArgumentParser(
+    description='Calculate the final value of construction and compensatory features and create shapefiles for each feature and JSON output.')
+
+# Add the arguments
+parser.add_argument('project', metavar='project', type=str, nargs='?', default=None,
+                    help='the project name')
+parser.add_argument('-n', '--new', metavar='NewProjectName',
+                    type=str, help='the new project name')
+parser.add_argument('-d', '--debug', action='store_true',
+                    help='enable debug mode')
+
+# Parse the arguments
+args = parser.parse_args()
+
+# Update settings with command line arguments if provided
+if args.project:
+    config.settings.project_name = args.project
+
+# Load the base configuration
+config.load_config()
+
+# Load project-specific configuration
+config.load_project_config()
+
+GRZ = config.settings.projects[config.settings.project_name].grz
+
+# Define directories
+dir_path = config.settings.projects[config.settings.project_name].path
+SCOPE_PATH = os.path.join(dir_path, 'scope')
+CHANGING_PATH = os.path.join(dir_path, 'changing')
+CONSTRUCTION_PATH = os.path.join(dir_path, 'construction')
+UNCHANGING_PATH = os.path.join(dir_path, 'unchanging')
+COMPENSATORY_PATH = os.path.join(dir_path, 'compensatory')
+PROTECTED_PATH = os.path.join(dir_path, 'protected')
+OUTPUT_PATH = os.path.join(dir_path, 'output')
+DEBUG_PATH = os.path.join(dir_path, 'debug')
+INTERFERENCE_PATH = os.path.join(dir_path, 'interference')
+
+# List of directories to create
+dirs = [dir_path, SCOPE_PATH, CHANGING_PATH, CONSTRUCTION_PATH, UNCHANGING_PATH,
+        COMPENSATORY_PATH, PROTECTED_PATH, OUTPUT_PATH, DEBUG_PATH, INTERFERENCE_PATH]
+
+# If the --new argument is provided, create the project directory and all subdirectories
+if args.new:
+    # Create all directories
+    for dir in dirs:
+        os.makedirs(dir, exist_ok=True)
+
+    print(
+        f"New project '{args.new}' has been created with all necessary directories.")
+    sys.exit()
+
+# Check if the project directory exists and is empty
+if os.path.exists(dir_path) and not os.listdir(dir_path):
+    print(f"Project directory {dir_path} is empty.")
+    sys.exit()
+elif not os.path.exists(dir_path):
+    print(f"Project directory {dir_path} does not exist.")
+    sys.exit()
+
+# Create all directories
+for dir in dirs:
+    os.makedirs(dir, exist_ok=True)
+
+# List of directories to clean
+dirs = [OUTPUT_PATH, DEBUG_PATH]
+
+# Remove all files and subdirectories in each directory
+for dir in dirs:
+    shutil.rmtree(dir, ignore_errors=True)
+    os.makedirs(dir, exist_ok=True)
+
+# Global debug counter dictionary
+debug_counter_dict = {}
+
+
+# TODO: Debug does not seem to do anything
+def debug(gdf, prefix='', show_plot_option=True, include_line_numbers=False):
+    do_debug(args.debug, debug_counter_dict, DEBUG_PATH, gdf,
+             prefix, show_plot_option, include_line_numbers)
+
+
+interference = get_features(INTERFERENCE_PATH)
+buffers = get_buffers(interference, config.settings.buffer_gen_distances)
+scope = get_features(SCOPE_PATH)
+
+print("Processing unchanged features...")
+unchanging_features = get_features(UNCHANGING_PATH)
+unchanging_features = filter_features(scope, unchanging_features)
+print("Processing changing features...")
+changing_features = get_features(CHANGING_PATH)
+changing_features = filter_features(scope, changing_features)
+
+print("Processing construction features...")
+construction_features = process_features(
+    CONSTRUCTION_PATH, 'construction', unchanging_features, changing_features, config.settings.projects[config.settings.project_name].changing_construction_base_values, scope)
+
+print("Processing compensatory features...")
+compensatory_features = process_features(
+    COMPENSATORY_PATH, 'compensatory', unchanging_features, changing_features, config.settings.projects[config.settings.project_name].changing_compensatory_base_values, scope)
+
+# debug(compensatory_features, 'compensatory')
+
+print("Processing protected area features...")
+protected_area_features = get_features(PROTECTED_PATH)
+protected_area_features = filter_features(scope, protected_area_features)
+protected_area_features = preprocess_features(
+    protected_area_features, 'protected_area')
+
+print("Processing geometric scope: Creating buffer zones for construction features...")
+construction_features = process_and_separate_buffer_zones(
+    scope, construction_features, buffers, protected_area_features)
+
+print("Processing geometric scope: Creating buffer zones for compensatory features...")
+compensatory_features = process_and_separate_buffer_zones(
+    scope, compensatory_features, buffers, protected_area_features)
+
+print("Processing geometric scope: Removing small areas from construction feature buffer zones...")
+construction_features = remove_geometries_with_small_areas(
+    construction_features)
+
+print("Processing geometric scope: Removing small areas from compensatory features...")
+compensatory_features = remove_geometries_with_small_areas(
+    compensatory_features)
+
+print("Adding compensatory values...")
+if not compensatory_features.empty:
+    compensatory_features = add_compensatory_value(
+        compensatory_features, protected_area_features)
+else:
+    print("No compensatory features found.")
+
+# ---> Construction Output Shapefile Creation <---
+
+print()
+print(config.settings.project_name)
+
+print("Calculating construction score...")
+construction_features = add_construction_score(
+    construction_features, config.settings.projects[config.settings.project_name].grz)
+
+total_construction_score = round(
+    construction_features['score'].sum(), 2)
+print(colored(
+    f"Total Construction score: {total_construction_score}", 'yellow'))
+
+print("Creating output shapefiles...")
+for file in construction_features['name'].unique():
+    current_features = construction_features[
+        construction_features['name'] == file]
+    check_and_warn_column_length(current_features)
+    save_to_shapefile(
+        current_features, 'Construction_' + file, OUTPUT_PATH)
+
+print("Writing output JSON and Excel files...")
+write_output_json_and_excel(total_construction_score, construction_features,
+                            filename='Construction', output_dir=OUTPUT_PATH)
+
+# ---> Compensatory Output Shapefile Creation <---
+# Check if the compensatory_features DataFrame is not empty
+if not compensatory_features.empty:
+    print("Calculating compensatory score...")
+    compensatory_features = add_compensatory_score(
+        compensatory_features, scope)
+
+    print("Creating output shapefiles...")
+    total_compensatory_score = round(compensatory_features['score'].sum(), 2)
+    print(colored(
+        f"Total Compensatory score: {total_compensatory_score}", 'yellow'))
+
+    print("Writing output JSON and Excel files...")
+    for file in compensatory_features['name'].unique():
+        current_features = compensatory_features[compensatory_features['name'] == file]
+        check_and_warn_column_length(current_features)
+        save_to_shapefile(
+            current_features, 'Compensatory_' + file, OUTPUT_PATH)
+
+    print("Writing output JSON and Excel files...")
+    write_output_json_and_excel(total_compensatory_score, compensatory_features,
+                                filename='Compensatory', output_dir=OUTPUT_PATH)
+else:
+    print(colored(
+        "No compensatory features found. Skipping the rest of the Compensatory Output operations.", 'yellow'))
+
+print("Creating plot...")
+create_plot(construction_features, compensatory_features,
+            interference, scope, OUTPUT_PATH, True)

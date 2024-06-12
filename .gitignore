@@ -2,3 +2,5 @@ DATA/
 
 .DS_Store
 
+*.pyc
+
