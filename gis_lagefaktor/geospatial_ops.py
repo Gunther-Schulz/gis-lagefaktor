@@ -11,13 +11,6 @@ from gis_lagefaktor.lagefaktor import add_lagefaktor_values
 from gis_lagefaktor.debugging import pt
 from gis_lagefaktor.config import settings
 
-CRS = settings.crs
-OUTPUT_DIR = settings.output_dir
-PROJECT_NAME = settings.project_name
-DEFAULT_SLIVER = settings.default_sliver
-CONSTRUCTION_LAGEFAKTOR_VALUES = settings.projects[PROJECT_NAME].construction_lagefaktor_values
-FILTER_SMALL_AREAS_LIMIT = settings.filter_small_areas_limit
-
 
 def create_buffer(linestrings, distance):
     """
@@ -81,12 +74,12 @@ def resolve_overlaps(feature):
             resolved = pd.concat([resolved, temp_gdf], ignore_index=True)
 
     resolved = resolved.explode(index_parts=True)
-    resolved.crs = CRS
+    resolved.crs = settings.crs
 
     return resolved
 
 
-def remove_slivers(gdf, buffer_distance=DEFAULT_SLIVER):
+def remove_slivers(gdf, buffer_distance=None):
     """
     Removes slivers from geometries by applying a small buffer.
 
@@ -97,9 +90,13 @@ def remove_slivers(gdf, buffer_distance=DEFAULT_SLIVER):
     Returns:
     - GeoDataFrame with slivers removed.
     """
+
+    if buffer_distance is None:
+        buffer_distance = settings.default_sliver
+
     gdf.geometry = gdf.geometry.buffer(
         buffer_distance).buffer(-buffer_distance)
-    gdf.crs = CRS
+    gdf.crs = settings.crs
     return gdf
 
 
@@ -328,13 +325,13 @@ def calculate_intersection_area(construction_feature, buffer, buffer_distance, p
     intersection = process_geodataframe_overlaps(
         intersection, protected_area_features)
     intersection = add_lagefaktor_values(
-        intersection, CONSTRUCTION_LAGEFAKTOR_VALUES[buffer_distance])
+        intersection, settings.projects[settings.project_name].construction_lagefaktor_values[buffer_distance])
     # intersection = filter_features(scope, intersection)
     intersection['buffer_dis'] = buffer_distance
     return intersection
 
 
-def remove_geometries_with_small_areas(gdf, area_limit=FILTER_SMALL_AREAS_LIMIT):
+def remove_geometries_with_small_areas(gdf, area_limit=None):
     """
     This function checks for geometries with zero area in a GeoDataFrame.
 
@@ -344,6 +341,9 @@ def remove_geometries_with_small_areas(gdf, area_limit=FILTER_SMALL_AREAS_LIMIT)
     Returns:
     GeoDataFrame: The GeoDataFrame with geometries with zero area removed.
     """
+    if area_limit is None:
+        area_limit = settings.filter_small_areas_limit
+
     zero_area = gdf[gdf.geometry.area <= area_limit]
     if not zero_area.empty:
         areas = zero_area.geometry.area.tolist()

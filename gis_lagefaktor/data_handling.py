@@ -13,10 +13,6 @@ import warnings
 
 from gis_lagefaktor.config import settings
 
-CRS = settings.crs
-OUTPUT_DIR = settings.output_dir
-PROJECT_NAME = settings.project_name
-
 
 def check_and_warn_column_length(df, column_name_limit=10, value_length_limit=255):
     """
@@ -58,7 +54,7 @@ def read_shapefile(file_path):
     print(colored(
         f"  {encoded_name}/{os.path.basename(file_path)}", 'yellow', attrs=['dark']))
     feature = gpd.read_file(file_path)
-    feature = feature.to_crs(CRS)
+    feature = feature.to_crs(settings.crs)
     feature = feature[['geometry']]
     feature['name'] = encoded_name
     return feature
@@ -81,7 +77,7 @@ def get_features(dir):
     if not shapefiles:
         print(
             colored(f"No shapefiles found in directory {dir}. Make sure shapefiles are under a subdirectory with the name of the type. For example 'ProjectName/construction/" + Fore.RED + "Baufeld" + Fore.RESET + "/*.shp", 'yellow'))
-        gdf = gpd.GeoDataFrame(columns=['geometry', 'name'], crs=CRS)
+        gdf = gpd.GeoDataFrame(columns=['geometry', 'name'], crs=settings.crs)
         return gdf
     else:
         print(colored(f"Found {len(shapefiles)} shapefiles:", 'green'))
@@ -93,7 +89,7 @@ def get_features(dir):
     features = [read_shapefile(shapefile)
                 for shapefile in shapefiles]
     gdf = pd.concat(features, ignore_index=True)
-    gdf = gdf.to_crs(CRS)
+    gdf = gdf.to_crs(settings.crs)
 
     return gdf
 
@@ -153,7 +149,7 @@ def save_to_shapefile(features, filename, output_dir):
                      driver='ESRI Shapefile')
 
 
-def write_output_json_and_excel(total_score, data, filename='output', output_dir=OUTPUT_DIR):
+def write_output_json_and_excel(total_score, data, filename='output', output_dir="output"):
     """
     This function writes output data to a JSON file and an Excel file.
 
@@ -178,7 +174,7 @@ def write_output_json_and_excel(total_score, data, filename='output', output_dir
     # Update the new dictionary with output_dict
     final_output_dict.update(output_dict)
 
-    with open(os.path.join(output_dir, PROJECT_NAME + '_' + filename + '.json'), 'w') as file:
+    with open(os.path.join(output_dir, settings.project_name + '_' + filename + '.json'), 'w') as file:
         sjson.dump(final_output_dict, file, ignore_nan=True,
                    ensure_ascii=False, indent=4)
 
@@ -217,5 +213,5 @@ def write_output_json_and_excel(total_score, data, filename='output', output_dir
     df = pd.concat(
         [df, pd.DataFrame({'Punktzahl': [total_score]})], ignore_index=True)
 
-    df.to_excel(os.path.join(output_dir, PROJECT_NAME + '_' +
+    df.to_excel(os.path.join(output_dir, settings.project_name + '_' +
                 filename + '.xlsx'), index=False)

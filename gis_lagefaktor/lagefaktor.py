@@ -1,8 +1,5 @@
 from gis_lagefaktor.config import settings
 
-CONSTRUCTION_LAGEFAKTOR_VALUES = settings.projects[
-    settings.project_name].construction_lagefaktor_values
-
 
 def add_lagefaktor_values(feature, lagefaktor_value):
     """
@@ -21,7 +18,7 @@ def add_lagefaktor_values(feature, lagefaktor_value):
         is_protected_not_null = feature['prot_cons'].notnull()
 
         feature['lagefaktor'] = feature['prot_cons'].fillna(lagefaktor_value)
-        if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
+        if lagefaktor_value == settings.projects[settings.project_name].construction_lagefaktor_values.get('<100'):
             # Only subtract 0.25 from 'lagefaktor' if 'prot_cons' is not null
             feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
     else:

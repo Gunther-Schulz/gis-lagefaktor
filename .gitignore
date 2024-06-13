@@ -4,3 +4,5 @@ DATA/
 
 *.pyc
 
+
+gis_lagefaktor/__pycache__/

@@ -8,51 +8,6 @@ from gis_lagefaktor.data_handling import get_value_with_warning, get_features
 from gis_lagefaktor.lagefaktor import add_lagefaktor_values
 from gis_lagefaktor.config import settings
 
-CRS = settings.crs
-GRZ_FACTORS = settings.grz_factors
-BUFFER_DISTANCES = settings.buffer_distances
-CONSTRUCTION_LAGEFAKTOR_VALUES = settings.projects[
-    settings.project_name].construction_lagefaktor_values
-CONSTRUCTION_PROTECTED_VALUES = settings.projects[
-    settings.project_name].construction_protected_values
-COMPENSATORY_MEASURE_VALUES = settings.projects[
-    settings.project_name].compensatory_measure_values
-COMPENSATORY_MEASURE_MINIMUM_AREAS = settings.projects[
-    settings.project_name].compensatory_measure_minimum_area
-COMPENSATORY_PROTECTED_VALUES = settings.projects[
-    settings.project_name].compensatory_protected_values
-COUNT_SAMLL_COMPENSATORY_IF_ADJECENT = settings.count_small_compensatory_if_adjacent
-
-
-# def add_lagefaktor_values(feature, lagefaktor_value):
-#     """
-#     This function adds 'lagefaktor' values to the given feature GeoDataFrame.
-
-#     Parameters:
-#     feature (GeoDataFrame): The GeoDataFrame to which to add 'lagefaktor' values.
-#     lagefaktor_value (float): The 'lagefaktor' value to add.
-
-#     Returns:
-#     GeoDataFrame: The updated GeoDataFrame with 'lagefaktor' values.
-#     """
-
-#     if 'prot_cons' in feature.columns:
-#         # Check if 'prot_cons' is not null
-#         is_protected_not_null = feature['prot_cons'].notnull()
-
-#         feature['lagefaktor'] = feature['prot_cons'].fillna(lagefaktor_value)
-#         if lagefaktor_value == CONSTRUCTION_LAGEFAKTOR_VALUES.get('<100'):
-#             # Only subtract 0.25 from 'lagefaktor' if 'prot_cons' is not null
-#             feature.loc[is_protected_not_null, 'lagefaktor'] -= 0.25
-#     else:
-#         feature['lagefaktor'] = lagefaktor_value
-
-#     # remove column prot_comp if it exists
-#     if 'prot_comp' in feature.columns:
-#         feature = feature.drop(columns='prot_comp')
-
-#     return feature
-
 
 def add_compensatory_value(compensatory_features, protected_area_features):
     """
@@ -66,13 +21,15 @@ def add_compensatory_value(compensatory_features, protected_area_features):
     GeoDataFrame: The updated GeoDataFrame with compensatory values.
     """
     compensatory_features['compensat'] = compensatory_features['name'].apply(
-        lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
+        lambda x: get_value_with_warning(settings.projects[
+            settings.project_name].compensatory_measure_values, x))
 
     # Add 'eligible' column
-    if COUNT_SAMLL_COMPENSATORY_IF_ADJECENT == True:
+    if settings.count_small_compensatory_if_adjacent == True:
         compensatory_features['eligible'] = compensatory_features.apply(
             lambda row: row['geometry'].area > get_value_with_warning(
-                COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
+                settings.projects[
+                    settings.project_name].compensatory_measure_minimum_area, row['name']), axis=1)
 
     if not protected_area_features.empty:
         protected_area_features = protected_area_features.sort_values(
@@ -85,10 +42,11 @@ def add_compensatory_value(compensatory_features, protected_area_features):
             compensatory_features)
 
     if not compensatory_features.empty:
-        if COUNT_SAMLL_COMPENSATORY_IF_ADJECENT == False:
+        if settings.count_small_compensatory_if_adjacent == False:
             compensatory_features['eligible'] = compensatory_features.apply(
                 lambda row: row['geometry'].area > get_value_with_warning(
-                    COMPENSATORY_MEASURE_MINIMUM_AREAS, row['name']), axis=1)
+                    settings.projects[
+                        settings.project_name].compensatory_measure_minimum_area, row['name']), axis=1)
 
     return compensatory_features
 
@@ -161,7 +119,7 @@ def add_construction_score(features, grz):
 
         total_value = feature['base_value'] * feature['lagefaktor'] * area
 
-        factor_a, factor_b, factor_c = GRZ_FACTORS[grz]
+        factor_a, factor_b, factor_c = settings.grz_factors[grz]
 
         total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
         score = round(total_value_adjusted, 2)
@@ -197,7 +155,7 @@ def process_geometric_scope(scope, construction_features, compensatory_features,
     scope['group'] = 0
     scope = scope.dissolve(by='group').explode(
         index_parts=False).reset_index(drop=True)
-    scope.crs = CRS
+    scope.crs = settings.crs
 
     return scope
 
@@ -227,13 +185,16 @@ def preprocess_features(features, feature_type, buffer_distance=10):
     if feature_type == 'compensatory':
         # Assign 'compensat' based on 'name'
         processed_features['compensat'] = processed_features['name'].map(
-            lambda x: get_value_with_warning(COMPENSATORY_MEASURE_VALUES, x))
+            lambda x: get_value_with_warning(settings.projects[
+                settings.project_name].compensatory_measure_values, x))
     elif feature_type == 'protected_area':
         # Set 'prot_cons' and 'prot_comp' based on 'name'
         processed_features['prot_cons'] = processed_features['name'].apply(
-            lambda x: get_value_with_warning(CONSTRUCTION_PROTECTED_VALUES, x))
+            lambda x: get_value_with_warning(settings.projects[
+                settings.project_name].construction_protected_values, x))
         processed_features['prot_comp'] = processed_features['name'].apply(
-            lambda x: get_value_with_warning(COMPENSATORY_PROTECTED_VALUES, x))
+            lambda x: get_value_with_warning(settings.projects[
+                settings.project_name].compensatory_protected_values, x))
         processed_features = processed_features.rename(
             columns={'name': 'prot_name'})
 
@@ -291,14 +252,14 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     # Check if there is a '<100' buffer
     if not buffers[0].empty:
         changing_feature_B1_intersection = calculate_intersection_area(
-            construction_feature, buffers[0], BUFFER_DISTANCES['<100'], protected_area_features, scope)
+            construction_feature, buffers[0], settings.buffer_distances['<100'], protected_area_features, scope)
         features = pd.concat(
             [features, changing_feature_B1_intersection], ignore_index=True)
 
     # Check if there is a '>100<625' buffer
     if len(buffers) > 1 and not buffers[1].empty:
         changing_feature_B2_intersection = calculate_intersection_area(
-            construction_feature, buffers[1], BUFFER_DISTANCES['>100<625'], protected_area_features, scope)
+            construction_feature, buffers[1], settings.buffer_distances['>100<625'], protected_area_features, scope)
         # Subtract changing_feature_B1_intersection from changing_feature_B2_intersection
         if not features.empty:
             changing_feature_B2_not_B1 = calculate_overlay(
@@ -316,10 +277,11 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     changing_feature_outside_B2 = process_geodataframe_overlaps(
         changing_feature_outside_B2, protected_area_features)
     changing_feature_outside_B2 = add_lagefaktor_values(
-        changing_feature_outside_B2, CONSTRUCTION_LAGEFAKTOR_VALUES[BUFFER_DISTANCES['>625']])
+        changing_feature_outside_B2, settings.projects[
+            settings.project_name].construction_lagefaktor_values[settings.buffer_distances['>625']])
     # changing_feature_outside_B2 = filter_features(
     #     scope, changing_feature_outside_B2)
-    changing_feature_outside_B2['buffer_dis'] = BUFFER_DISTANCES['>625']
+    changing_feature_outside_B2['buffer_dis'] = settings.buffer_distances['>625']
 
     features = pd.concat(
         [features, changing_feature_outside_B2], ignore_index=True)
@@ -344,7 +306,8 @@ def calculate_compensatory_score(row, current_features):
             row.geometry.area * row['lagefaktor']
         if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
             prot_value = get_value_with_warning(
-                COMPENSATORY_PROTECTED_VALUES, row['prot_name'])
+                settings.projects[
+                    settings.project_name].compensatory_protected_values, row['prot_name'])
         else:
             prot_value = 1
 
