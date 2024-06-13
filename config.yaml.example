@@ -1,5 +1,19 @@
+crs: "epsg:25833"
+buffer_gen_distances: [100, 625]
+buffer_distances:
+  "<100": "<100"
+  ">100<625": ">100<625"
+  ">625": ">625"
+grz_factors:
+  "0.5": [0.5, 0.2, 0.6]
+  "0.75": [0.75, 0.5, 0.8]
+default_sliver: 0.001
+
+filter_small_areas: true
+filter_small_areas_limit: 1
+
+count_small_compensatory_if_adjacent: false
+
 projects:
-  project1:
-    path: /path/to/project1
-  project2:
-    path: /path/to/project2
+  Waren:
+    path: "/home/g/hidrive/Öffentlich Planungsbüro Schulz/Projekte/22-20 Maxsolar - Waren, Grabowhöfe/GIS/Lagefaktor/Waren"

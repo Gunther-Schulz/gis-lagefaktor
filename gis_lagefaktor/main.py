@@ -2,6 +2,8 @@
 
 
 import argparse
+
+import yaml
 from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length
 from gis_lagefaktor.feature_processing import process_features, add_compensatory_score, process_and_separate_buffer_zones
 from gis_lagefaktor.geospatial_ops import get_buffers, filter_features
@@ -88,12 +90,43 @@ dirs = [dir_path, SCOPE_PATH, CHANGING_PATH, CONSTRUCTION_PATH, UNCHANGING_PATH,
 
 # If the --new argument is provided, create the project directory and all subdirectories
 if args.new:
+    if args.new not in config.settings.projects:
+        print(
+            f"Error: Project '{args.new}' is not defined in the configuration settings.")
+        sys.exit()
+
     # Create all directories
     for dir in dirs:
         os.makedirs(dir, exist_ok=True)
 
-    print(
-        f"New project '{args.new}' has been created with all necessary directories.")
+    # Create a sample config.yaml in the project directory
+    sample_config_path = os.path.join(dir_path, 'config.yaml')
+    config_dict = {
+        "crs": "epsg:25833",
+        "buffer_gen_distances": [100, 625],
+        "buffer_distances": {
+            "<100": "<100",
+            ">100<625": ">100<625",
+            ">625": ">625"
+        },
+        "grz_factors": {
+            "0.5": [0.5, 0.2, 0.6],
+            "0.75": [0.75, 0.5, 0.8]
+        },
+        "default_sliver": 0.001,
+        "filter_small_areas": True,
+        "filter_small_areas_limit": 1,
+        "count_small_compensatory_if_adjacent": False,
+        "projects": {
+            args.new: {
+                "path": dir_path
+            }
+        }
+    }
+    with open(sample_config_path, 'w') as config_file:
+        yaml.dump(config_dict, config_file)
+
+    print(f"New project '{args.new}' has been created with all necessary directories and a sample config.yaml. Please edit the project config, add shape files (some are optional) to the project directory in the 'scope', 'changing', 'construction', 'unchanging', 'compensatory', and 'protected' directories, and run the program again.")
     sys.exit()
 
 # Check if the project directory exists and is empty
