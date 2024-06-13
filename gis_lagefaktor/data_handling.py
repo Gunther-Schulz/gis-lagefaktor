@@ -133,16 +133,22 @@ def get_value_with_warning(values, key):
     return value
 
 
-def save_to_shapefile(features, filename, output_dir):
+def save_to_shapefile(features, filename, output_dir, add_ids=False):
     """
-    This function saves a GeoDataFrame to a shapefile.
+    This function saves a GeoDataFrame to a shapefile, optionally adding a column 'fid' with unique IDs.
 
     Parameters:
     features (GeoDataFrame): The GeoDataFrame to save.
     filename (str): The name of the shapefile.
+    output_dir (str): The directory where the shapefile will be saved.
+    add_ids (bool, optional): If True, adds a column 'fid' with unique IDs starting from 1. Defaults to False.
 
     The shapefile is saved in the OUTPUT_DIR directory.
     """
+    if add_ids:
+        # Add a column 'fid' with unique IDs starting from 1
+        features['fid'] = range(1, len(features) + 1)
+
     print(colored(
         f"Saving {filename} to shapefile {output_dir}/{filename}.shp", 'yellow', attrs=['dark']))
     features.to_file(os.path.join(output_dir, filename),
