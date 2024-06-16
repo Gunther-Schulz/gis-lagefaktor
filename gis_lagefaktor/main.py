@@ -10,7 +10,7 @@ from gis_lagefaktor.geospatial_ops import get_buffers, filter_features
 from gis_lagefaktor.visualization import create_plot
 import os
 import shutil
-import json
+
 import sys
 from gis_lagefaktor.debugging import do_debug, pt
 from gis_lagefaktor.custom_warning import custom_warning
@@ -26,24 +26,6 @@ warnings.showwarning = custom_warning
 if len(sys.argv) == 1:
     print("No arguments provided. Please run the script with the required arguments.")
     sys.exit()
-
-# # Constants
-# CRS = 'epsg:25833'
-# GRZ = '0.5'
-# DATA_DIR = './DATA'
-# GRZ_FACTORS = {
-#     '0.5': [0.5, 0.2, 0.6],
-#     '0.75': [0.75, 0.5, 0.8]
-# }
-# # DEFAULT_SLIVER = 0.0001
-# DEFAULT_SLIVER = 0.001
-
-# FILTER_SMALL_AREAS = True
-# FILTER_SMALL_AREAS_LIMIT = 1
-
-# COUNT_SAMLL_COMPENSATORY_IF_ADJECENT = False
-
-# AREA_LIMIT = 1
 
 # Create the parser
 parser = argparse.ArgumentParser(
@@ -229,7 +211,7 @@ for file in construction_features['name'].unique():
         construction_features['name'] == file]
     check_and_warn_column_length(current_features)
     save_to_shapefile(
-        current_features, 'Construction_' + file, OUTPUT_PATH)
+        current_features, 'Construction_' + file, OUTPUT_PATH, True)
 
 print("Writing output JSON and Excel files...")
 write_output_json_and_excel(total_construction_score, construction_features,
@@ -252,7 +234,7 @@ if not compensatory_features.empty:
         current_features = compensatory_features[compensatory_features['name'] == file]
         check_and_warn_column_length(current_features)
         save_to_shapefile(
-            current_features, 'Compensatory_' + file, OUTPUT_PATH)
+            current_features, 'Compensatory_' + file, OUTPUT_PATH, True)
 
     print("Writing output JSON and Excel files...")
     write_output_json_and_excel(total_compensatory_score, compensatory_features,

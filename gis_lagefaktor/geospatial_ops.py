@@ -12,19 +12,20 @@ from gis_lagefaktor.debugging import pt
 from gis_lagefaktor.config import settings
 
 
-def create_buffer(linestrings, distance):
+def create_buffer(linestrings, distance, resolution=64):
     """
     This function creates a buffer around each linestring and dissolves all geometries into a single one.
 
     Parameters:
     linestrings (GeoSeries): The linestrings around which to create buffers.
     distance (float): The distance for the buffer.
+    resolution (int): The number of segments used to approximate a quarter circle around each vertex in the buffer operation.
 
     Returns:
     GeoDataFrame: A GeoDataFrame containing the buffers.
     """
-    # Create a buffer around each linestring and dissolve all geometries into a single one
-    buffers = linestrings.buffer(distance).to_frame().rename(
+    # Create a buffer around each linestring with specified resolution and dissolve all geometries into a single one
+    buffers = linestrings.buffer(distance, resolution=resolution).to_frame().rename(
         columns={0: 'geometry'}).set_geometry('geometry').dissolve()
     return buffers
 
@@ -79,13 +80,14 @@ def resolve_overlaps(feature):
     return resolved
 
 
-def remove_slivers(gdf, buffer_distance=None):
+def remove_slivers(gdf, buffer_distance=None, resolution=64):
     """
     Removes slivers from geometries by applying a small buffer.
 
     Parameters:
     - gdf: GeoDataFrame to be processed.
     - buffer_distance: Distance for buffering operations.
+    - resolution: The number of segments used to approximate a quarter circle around each vertex.
 
     Returns:
     - GeoDataFrame with slivers removed.
@@ -95,17 +97,18 @@ def remove_slivers(gdf, buffer_distance=None):
         buffer_distance = settings.default_sliver
 
     gdf.geometry = gdf.geometry.buffer(
-        buffer_distance).buffer(-buffer_distance)
+        buffer_distance, resolution=resolution).buffer(-buffer_distance, resolution=resolution)
     gdf.crs = settings.crs
     return gdf
 
 
-def clean_geometries(gdf):
+def clean_geometries(gdf, resolution=16):
     """
     This function cleans invalid geometries in a GeoDataFrame and plots the invalid and cleaned geometries.
 
     Parameters:
     gdf (GeoDataFrame): The GeoDataFrame to clean.
+    resolution (int): The number of segments used to approximate a quarter circle around each vertex in the buffer operation.
 
     Returns:
     GeoDataFrame: The cleaned GeoDataFrame.
@@ -121,8 +124,8 @@ def clean_geometries(gdf):
         invalid_geometries.plot(ax=axs[0], color='red')
         axs[0].set_title('Invalid Geometries')
 
-        # Clean geometries
-        gdf['geometry'] = gdf.geometry.buffer(0)
+        # Clean geometries by applying a zero-width buffer with increased resolution
+        gdf['geometry'] = gdf.geometry.buffer(0, resolution=resolution)
 
         # Plot valid geometries
         gdf.plot(ax=axs[1], color='green')
