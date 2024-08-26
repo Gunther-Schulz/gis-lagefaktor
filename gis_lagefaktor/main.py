@@ -246,3 +246,46 @@ else:
 print("Creating plot...")
 create_plot(construction_features, compensatory_features,
             interference, scope, OUTPUT_PATH, True)
+
+
+def assign_sub_type(features, config):
+    # Example of assigning sub-type based on configuration
+    for feature in features.itertuples():
+        land_use_type = getattr(feature, 'land_use_type', None)
+        if land_use_type in config['changing_construction_base_values']:
+            features.at[feature.Index, 'sub_type'] = 'changing_construction'
+        elif land_use_type in config['changing_compensatory_base_values']:
+            features.at[feature.Index, 'sub_type'] = 'changing_compensatory'
+        elif land_use_type in config['compensatory_measure_values']:
+            features.at[feature.Index, 'sub_type'] = 'compensatory_measure'
+    return features
+
+
+def process_features(file_path, feature_type, config):
+    features = get_features(file_path)
+    features['type'] = feature_type
+    features = assign_sub_type(features, config)
+    return features
+
+
+def write_output_json_and_excel(total_score, features, filename, output_dir):
+    import pandas as pd
+    import json
+
+    # Calculate area if not already present
+    if 'area' not in features.columns:
+        features['area'] = features.geometry.area
+
+    # Prepare data for output
+    output_data = features[['name', 'type', 'sub_type', 'area', 'score']]
+
+    # Write to Excel
+    excel_path = os.path.join(output_dir, f"{filename}.xlsx")
+    output_data.to_excel(excel_path, index=False)
+
+    # Write to JSON
+    json_path = os.path.join(output_dir, f"{filename}.json")
+    with open(json_path, 'w') as f:
+        json.dump(output_data.to_dict(orient='records'), f)
+
+    print(f"Output written to {excel_path} and {json_path}")
