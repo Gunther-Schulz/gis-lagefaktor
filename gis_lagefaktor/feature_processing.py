@@ -211,18 +211,25 @@ def process_features(directory, feature_type, unchanged_features, changing_featu
     unchanged_features (GeoDataFrame): The features that remain unchanged.
     changing_features (GeoDataFrame): The features that are changing.
     changing_values (list): The values that are changing.
+    scope (GeoDataFrame): The geometric scope to clip features to.
 
     Returns:
     GeoDataFrame: The processed features.
     """
     features = get_features(directory)
-    features = filter_features(scope, features)
+    features = gpd.clip(features, scope)
 
     features = preprocess_features(features, feature_type)
+
+    # Ensure features contain only Polygon geometries
+    features = features[features.geometry.type.isin(
+        ['Polygon', 'MultiPolygon'])]
+    features = features.explode(index_parts=False)
+    features = features[features.geometry.type == 'Polygon']
+
     features = process_and_overlay_features(
         features, unchanged_features, changing_features, changing_values)
 
-    # TODO: Can I merge function below somehow with function clean_and_merge_features?
     features = merge_and_flatten_overlapping_geometries(features)
 
     return features
