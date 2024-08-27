@@ -207,8 +207,8 @@ print(colored(
 
 print("Creating output shapefiles...")
 for file in construction_features['name'].unique():
-    current_features = construction_features[
-        construction_features['name'] == file]
+    current_features = construction_features[construction_features['name'] == file].copy(
+    )
     check_and_warn_column_length(current_features)
     save_to_shapefile(
         current_features, 'Construction_' + file, OUTPUT_PATH, True)
@@ -222,7 +222,7 @@ write_output_json_and_excel(total_construction_score, construction_features,
 if not compensatory_features.empty:
     print("Calculating compensatory score...")
     compensatory_features = add_compensatory_score(
-        compensatory_features, scope)
+        compensatory_features.copy(), scope)
 
     print("Creating output shapefiles...")
     total_compensatory_score = round(compensatory_features['score'].sum(), 2)
@@ -231,7 +231,8 @@ if not compensatory_features.empty:
 
     print("Writing output JSON and Excel files...")
     for file in compensatory_features['name'].unique():
-        current_features = compensatory_features[compensatory_features['name'] == file]
+        current_features = compensatory_features[compensatory_features['name'] == file].copy(
+        )
         check_and_warn_column_length(current_features)
         save_to_shapefile(
             current_features, 'Compensatory_' + file, OUTPUT_PATH, True)
