@@ -1,6 +1,6 @@
 import re
 from termcolor import colored
-from gis_lagefaktor.debugging import get_calling_function_name, get_calling_line_number
+import traceback
 
 
 def custom_warning(message, category, filename, lineno, file=None, line=None):
@@ -19,14 +19,16 @@ def custom_warning(message, category, filename, lineno, file=None, line=None):
     match_no_buffer = re.search(no_buffer_pattern, str(message))
     match_keepdims = re.search(keepdims_pattern, str(message))
 
-    # Get the name of the calling function
-    calling_fn_name = get_calling_function_name()
-    calling_fn_line = get_calling_line_number()
-
     if match_no_buffer:
-        # print(colored('Warning:', 'red') + f' {calling_fn_name}, line {str(calling_fn_line)}: ' +
-        #       "During overlay operations, geometries such as lines or points that don't match the geometry type of the first DataFrame can be dropped.")
+        # Silently ignore this warning
         pass
     elif not match_keepdims:
-        print(colored('Warning:', 'red') + f' {calling_fn_name}, line {str(calling_fn_line)}: ' +
-              str(message))
+        # Get the full traceback
+        # Remove the last entry (this function call)
+        tb = traceback.extract_stack()[:-1]
+        tb_str = ''.join(traceback.format_list(tb))
+
+        print(colored('Warning:', 'red'))
+        print(tb_str.strip())
+        print(colored(str(message), 'yellow'))
+        print()  # Add a blank line for better readability
