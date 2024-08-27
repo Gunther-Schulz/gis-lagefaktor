@@ -337,10 +337,11 @@ def add_compensatory_score(features, scope):
     """
 
     pt(features)
-    all_features = pd.DataFrame()
+    all_features = []
     for file in features['name'].unique():
-        current_features = features[features['name'] == file]
-        current_features['score'] = round(current_features.apply(
-            lambda row: calculate_compensatory_score(row, current_features), axis=1), 2)
-        all_features = pd.concat([all_features, current_features])
-    return all_features
+        current_features = features[features['name'] == file].copy()
+        current_features['score'] = current_features.apply(
+            lambda row: round(calculate_compensatory_score(row, current_features), 2), axis=1)
+        all_features.append(current_features)
+
+    return pd.concat(all_features, ignore_index=True)
