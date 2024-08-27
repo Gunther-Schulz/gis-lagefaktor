@@ -353,8 +353,18 @@ def remove_geometries_with_small_areas(gdf, area_limit=None):
         print(colored(
             f'Warning: Geometries with small area found: {areas}. Removing...', 'red'))
         pt(zero_area, 'Zero Area Geometries')
-        # plot zero_area
-        zero_area.plot()
+        # Plot zero_area geometries
+        fig, ax = plt.subplots(figsize=(10, 10))
+        zero_area.plot(ax=ax)
+        # Mark small geometries with red X
+        for idx, row in zero_area.iterrows():
+            centroid = row.geometry.centroid
+            if not centroid.is_empty:
+                ax.plot(centroid.x, centroid.y, 'rx',
+                        markersize=10, markeredgewidth=2)
+            else:
+                print(f"Warning: Empty centroid for geometry at index {idx}")
+        ax.set_title("Geometries with Small Areas")
         plt.show()
         gdf = gdf[gdf.geometry.area > area_limit]
     return gdf
