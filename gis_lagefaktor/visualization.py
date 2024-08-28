@@ -27,17 +27,13 @@ def create_plot(construction_features, compensation_features, interference, scop
     handles = []
     labels = []
 
-    # Create a color palette with distinct colors
-    n_colors = (len(construction_features['buffer_dis'].unique()) *
-                len(construction_features['base_name'].unique()) +
-                len(compensation_features.groupby(['compensat', 'buffer_dis'])) +
-                (1 if not interference.empty else 0) +
-                (len(scope) if not scope.empty else 0))
-
-    color_palette = plt.cm.get_cmap(
-        'tab20').colors + plt.cm.get_cmap('Set2').colors + plt.cm.get_cmap('Set3').colors
-    color_palette = color_palette * (n_colors // len(color_palette) + 1)
-    color_iter = iter(color_palette[:n_colors])
+    # Create color palettes
+    construction_palette = {
+        '<100': plt.cm.get_cmap('Blues')(np.linspace(0.3, 0.8, 2)),
+        '>100<625': plt.cm.get_cmap('Oranges')(np.linspace(0.3, 0.8, 2)),
+        '>625': plt.cm.get_cmap('Greens')(np.linspace(0.3, 0.8, 2))
+    }
+    compensation_palette = plt.cm.get_cmap('Greens')(np.linspace(0.3, 0.8, 3))
 
     if not construction_features.empty and 'buffer_dis' in construction_features.columns and 'base_name' in construction_features.columns:
         handles.append(
@@ -45,8 +41,11 @@ def create_plot(construction_features, compensation_features, interference, scop
         labels.append('Flächentypen')
 
         for buffer_dis, group in construction_features.groupby('buffer_dis'):
-            for base_name, subgroup in group.groupby('base_name'):
-                color = next(color_iter)
+            colors = construction_palette[buffer_dis]
+            base_names = group['base_name'].unique()
+            for i, base_name in enumerate(base_names):
+                subgroup = group[group['base_name'] == base_name]
+                color = colors[i % len(colors)]
                 subgroup.plot(ax=ax, color=color,
                               edgecolor='black', linewidth=0.5)
                 handles.append(Patch(color=color))
@@ -60,25 +59,27 @@ def create_plot(construction_features, compensation_features, interference, scop
                        label='Kompensationswerte'))
         labels.append('Kompensationswerte')
 
-        for (compensat, buffer_dis), subgroup in compensation_features.groupby(['compensat', 'buffer_dis']):
-            color = next(color_iter)
-            subgroup.plot(ax=ax, color=color,
-                          edgecolor='black', linewidth=0.5)
-            handles.append(Patch(color=color))
-            labels.append(f"{compensat} - Buffer: {buffer_dis}")
+        for i, (compensat, group) in enumerate(compensation_features.groupby('compensat')):
+            for j, (buffer_dis, subgroup) in enumerate(group.groupby('buffer_dis')):
+                color = compensation_palette[j]
+                subgroup.plot(ax=ax, color=color,
+                              edgecolor='black', linewidth=0.5)
+                handles.append(Patch(color=color))
+                labels.append(f"{compensat} - Buffer: {buffer_dis}")
 
     handles.append(Patch(facecolor='none', edgecolor='none', label=''))
     labels.append('')
 
     if not interference.empty:
-        color = next(color_iter)
-        interference.plot(ax=ax, color=color)
-        handles.append(Patch(color=color, label='Störungsquelle'))
+        interference.plot(ax=ax, color='cyan')
+        handles.append(Patch(color='cyan', label='Störungsquelle'))
         labels.append('Störungsquelle')
 
     if not scope.empty:
+        strong_colors = ['black', 'red', 'blue', 'green',
+                         'purple', 'orange']  # Add more if needed
         for idx, row in scope.iterrows():
-            color = next(color_iter)
+            color = strong_colors[idx % len(strong_colors)]
             ax.plot(*row.geometry.boundary.xy, color=color,
                     linestyle='dashed', linewidth=2, dashes=(5, 5))
             handles.append(Patch(color=color, linestyle='dashed', fill=False))
