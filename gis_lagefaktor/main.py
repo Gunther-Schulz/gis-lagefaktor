@@ -178,11 +178,11 @@ compensatory_features = process_and_separate_buffer_zones(
 
 print("Processing geometric scope: Removing small areas from construction feature buffer zones...")
 construction_features = remove_geometries_with_small_areas(
-    construction_features)
+    construction_features, scope=scope)
 
 print("Processing geometric scope: Removing small areas from compensatory features...")
 compensatory_features = remove_geometries_with_small_areas(
-    compensatory_features)
+    compensatory_features, scope=scope)
 
 print("Adding compensatory values...")
 if not compensatory_features.empty:
