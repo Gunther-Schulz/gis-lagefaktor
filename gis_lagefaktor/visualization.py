@@ -74,34 +74,33 @@ def create_plot(construction_features, compensation_features, interference, scop
         ax.legend(handles=handles, labels=labels, loc='best')
 
     if not compensation_features.empty and 'compensat' in compensation_features.columns:
-        # if 'compensat' in compensation_features.columns:
         column_name = 'compensat'
-        # Define the color map and norm
-        colors = ['red', 'green', 'blue']  # replace with the colors you want
-        bounds = [1, 2, 3, 4]  # replace with the boundaries you want
-        cmap = ListedColormap(colors)
-        norm = BoundaryNorm(bounds, cmap.N)
 
-        # Plot the GeoDataFrame without the legend
-        compensation_features.plot(
-            column=column_name, ax=ax, cmap=cmap, norm=norm, edgecolor='black', linewidth=0.5)
+        # Generate a unique color for each polygon
+        num_polygons = len(compensation_features)
+        color_palette = sns.color_palette("husl", num_polygons)
 
-        # Add area labels
-        if plot_area:
-            for x, y, label in zip(construction_features.geometry.centroid.x, construction_features.geometry.centroid.y, construction_features.geometry.area):
-                ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
-        # Get the unique values in the column
-        unique_values = compensation_features[column_name].unique()
+        # Plot each polygon with its unique color
+        for idx, row in compensation_features.iterrows():
+            color = color_palette[idx]
+            ax.fill(row.geometry.exterior.xy[0], row.geometry.exterior.xy[1],
+                    color=color, edgecolor='black', linewidth=0.5)
 
-        # Create a legend entry for each unique value
-        compensat_patches = [Patch(color=cmap(
-            norm(value)), label=value) for value in unique_values]
+        # Create legend entries
+        compensat_patches = [Patch(color=color_palette[idx],
+                                   label=f"{row[column_name]}")
+                             for idx, row in compensation_features.iterrows()]
 
         handles.append(Patch(facecolor='none', edgecolor='none',
-                       label='Kompensationswert'))
+                       label='Kompensationswerte'))
         handles.extend(compensat_patches)
-        labels.append('Kompensationswert')
-        labels.extend(unique_values)
+        labels.append('Kompensationswerte')
+        labels.extend([patch.get_label() for patch in compensat_patches])
+
+        # Add area labels if needed
+        if plot_area:
+            for x, y, label in zip(compensation_features.geometry.centroid.x, compensation_features.geometry.centroid.y, compensation_features.geometry.area):
+                ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
 
     if not interference.empty:
         # Plot 'interference' on the same axes
