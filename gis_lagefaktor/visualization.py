@@ -6,6 +6,7 @@ from gis_lagefaktor.config import settings
 import os
 from gis_lagefaktor.debugging import pt
 import random
+import numpy as np
 
 
 def random_color():
@@ -120,10 +121,15 @@ def create_plot(construction_features, compensation_features, interference, scop
         print("Scope geometry types:")
         print(scope.geometry.geom_type.value_counts())
 
+        # Define a set of strong, distinct colors
+        strong_colors = ['#FF0000', '#00FF00', '#0000FF', '#FF00FF', '#FFFF00', '#00FFFF',
+                         '#FF8000', '#8000FF', '#0080FF', '#FF0080', '#80FF00', '#00FF80']
+
         # Plot all geometries at once
         for idx, row in scope.iterrows():
-            color = random_color()
-            ax.plot(*row.geometry.boundary.xy, color=color, linestyle='dashed')
+            color = strong_colors[idx % len(strong_colors)]
+            ax.plot(*row.geometry.boundary.xy, color=color, linestyle='dashed',
+                    linewidth=2, dashes=(5, 5))  # Thicker lines with adjusted dash pattern
 
             # Create a patch for the legend
             scope_patch = Patch(color=color, linestyle='dashed', fill=False)
@@ -142,8 +148,18 @@ def create_plot(construction_features, compensation_features, interference, scop
                loc='upper left', bbox_to_anchor=(1, 1))
 
     plt.title(settings.project_name)
+
+    # Adjust the layout to make room for the annotation
+    plt.tight_layout()
+
+    # Add centered coordinate system information
+    crs = construction_features.crs
+    if crs:
+        fig.text(0.5, -0.02, f"Coordinate System: {crs.to_string()}",
+                 fontsize=8, ha='center', va='top')
+
     # write plot to file
     plt.savefig(os.path.join(output_path, settings.project_name + '_plot.png'),
-                dpi=600, bbox_inches='tight')
+                dpi=600, bbox_inches='tight', pad_inches=0.1)
     if show_plot:
         plt.show()
