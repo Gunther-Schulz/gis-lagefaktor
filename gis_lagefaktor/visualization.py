@@ -4,6 +4,12 @@ from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from gis_lagefaktor.config import settings
 import os
+from gis_lagefaktor.debugging import pt
+import random
+
+
+def random_color():
+    return "#{:06x}".format(random.randint(0, 0xFFFFFF))
 
 
 def create_plot(construction_features, compensation_features, interference, scope, output_path, show_plot=False):
@@ -19,7 +25,9 @@ def create_plot(construction_features, compensation_features, interference, scop
     """
 
     # Assuming 'features' is a GeoDataFrame
-    fig, ax = plt.subplots(1, 1)
+    # Increase the figure size (adjust these values as needed)
+    # Increased from default size
+    fig, ax = plt.subplots(1, 1, figsize=(20, 16))
 
     column_name = ''
     handles = []
@@ -109,16 +117,26 @@ def create_plot(construction_features, compensation_features, interference, scop
         labels.append('Störungsquelle')
 
     if not scope.empty:
-        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+        pt(scope)
+        print("Scope geometry types:")
+        print(scope.geometry.geom_type.value_counts())
 
-        scope_patch = Patch(
-            color='black', label='Geltungsbereich', linestyle='dashed', fill=False)
+        # Plot all geometries at once
+        for idx, row in scope.iterrows():
+            color = random_color()
+            ax.plot(*row.geometry.boundary.xy, color=color, linestyle='dashed')
+
+            # Create a patch for the legend
+            scope_patch = Patch(color=color, linestyle='dashed', fill=False)
+
+            # Add to handles and labels
+            handles.append(scope_patch)
+            labels.append(
+                row['name'] if 'name' in row else f'Geltungsbereich {idx+1}')
 
         handles.append(
             Patch(facecolor='none', edgecolor='none', label='Geltungsbereich'))
-        handles.append(scope_patch)
         labels.append('')
-        labels.append('Geltungsbereich')
 
     # Create a single legend for all entries
     plt.legend(handles=handles, labels=labels,
@@ -126,7 +144,7 @@ def create_plot(construction_features, compensation_features, interference, scop
 
     plt.title(settings.project_name)
     # write plot to file
-    plt.savefig(os.path.join(output_path, settings.project_name +
-                '_plot.png'), dpi=600, bbox_inches='tight')
+    plt.savefig(os.path.join(output_path, settings.project_name + '_plot.png'),
+                dpi=600, bbox_inches='tight')
     if show_plot:
         plt.show()
