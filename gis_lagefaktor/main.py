@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 
+import matplotlib.pyplot as plt
 import argparse
 
 import openpyxl
@@ -365,3 +366,35 @@ def add_parcel_report_to_excel(parcel_report, output_dir):
 
 # Add this at the end of main.py, after the parcel report generation
 add_parcel_report_to_excel(parcel_report, OUTPUT_PATH)
+
+
+def plot_parcels_with_features(parcel_features, construction_features, compensatory_features):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
+
+    # Plot parcels with construction features
+    parcel_features.plot(ax=ax1, color='lightgrey', edgecolor='black')
+    construction_features.plot(ax=ax1, color='red', alpha=0.5)
+    ax1.set_title('Parcels with Construction Features')
+
+    # Plot parcels with compensatory features
+    # Changed from ax=2 to ax=ax2
+    parcel_features.plot(ax=ax2, color='lightgrey', edgecolor='black')
+    compensatory_features.plot(ax=ax2, color='green', alpha=0.5)
+    ax2.set_title('Parcels with Compensatory Features')
+
+    for ax in (ax1, ax2):
+        ax.set_axis_off()
+        # Add labels to parcels
+        for idx, row in parcel_features.iterrows():
+            centroid = row.geometry.centroid
+            ax.annotate(text=row['label'], xy=(centroid.x, centroid.y),
+                        xytext=(3, 3), textcoords="offset points",
+                        fontsize=8, color='black', ha='center', va='center')
+
+    plt.tight_layout()
+    plt.show()  # Show the plot instead of saving it
+    plt.close(fig)  # Close the figure to free up memory
+
+
+plot_parcels_with_features(
+    parcel_features, construction_features, compensatory_features)
