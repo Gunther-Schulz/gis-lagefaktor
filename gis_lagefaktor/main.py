@@ -178,11 +178,11 @@ compensatory_features = process_and_separate_buffer_zones(
 
 print("Processing geometric scope: Removing small areas from construction feature buffer zones...")
 construction_features = remove_geometries_with_small_areas(
-    construction_features)
+    construction_features, scope=scope)
 
 print("Processing geometric scope: Removing small areas from compensatory features...")
 compensatory_features = remove_geometries_with_small_areas(
-    compensatory_features)
+    compensatory_features, scope=scope)
 
 print("Adding compensatory values...")
 if not compensatory_features.empty:
@@ -207,8 +207,8 @@ print(colored(
 
 print("Creating output shapefiles...")
 for file in construction_features['name'].unique():
-    current_features = construction_features[
-        construction_features['name'] == file]
+    current_features = construction_features[construction_features['name'] == file].copy(
+    )
     check_and_warn_column_length(current_features)
     save_to_shapefile(
         current_features, 'Construction_' + file, OUTPUT_PATH, True)
@@ -222,7 +222,7 @@ write_output_json_and_excel(total_construction_score, construction_features,
 if not compensatory_features.empty:
     print("Calculating compensatory score...")
     compensatory_features = add_compensatory_score(
-        compensatory_features, scope)
+        compensatory_features.copy(), scope)
 
     print("Creating output shapefiles...")
     total_compensatory_score = round(compensatory_features['score'].sum(), 2)
@@ -231,7 +231,8 @@ if not compensatory_features.empty:
 
     print("Writing output JSON and Excel files...")
     for file in compensatory_features['name'].unique():
-        current_features = compensatory_features[compensatory_features['name'] == file]
+        current_features = compensatory_features[compensatory_features['name'] == file].copy(
+        )
         check_and_warn_column_length(current_features)
         save_to_shapefile(
             current_features, 'Compensatory_' + file, OUTPUT_PATH, True)
@@ -246,3 +247,46 @@ else:
 print("Creating plot...")
 create_plot(construction_features, compensatory_features,
             interference, scope, OUTPUT_PATH, True)
+
+
+def assign_sub_type(features, config):
+    # Example of assigning sub-type based on configuration
+    for feature in features.itertuples():
+        land_use_type = getattr(feature, 'land_use_type', None)
+        if land_use_type in config['changing_construction_base_values']:
+            features.at[feature.Index, 'sub_type'] = 'changing_construction'
+        elif land_use_type in config['changing_compensatory_base_values']:
+            features.at[feature.Index, 'sub_type'] = 'changing_compensatory'
+        elif land_use_type in config['compensatory_measure_values']:
+            features.at[feature.Index, 'sub_type'] = 'compensatory_measure'
+    return features
+
+
+def process_features(file_path, feature_type, config):
+    features = get_features(file_path)
+    features['type'] = feature_type
+    features = assign_sub_type(features, config)
+    return features
+
+
+def write_output_json_and_excel(total_score, features, filename, output_dir):
+    import pandas as pd
+    import json
+
+    # Calculate area if not already present
+    if 'area' not in features.columns:
+        features['area'] = features.geometry.area
+
+    # Prepare data for output
+    output_data = features[['name', 'type', 'sub_type', 'area', 'score']]
+
+    # Write to Excel
+    excel_path = os.path.join(output_dir, f"{filename}.xlsx")
+    output_data.to_excel(excel_path, index=False)
+
+    # Write to JSON
+    json_path = os.path.join(output_dir, f"{filename}.json")
+    with open(json_path, 'w') as f:
+        json.dump(output_data.to_dict(orient='records'), f)
+
+    print(f"Output written to {excel_path} and {json_path}")

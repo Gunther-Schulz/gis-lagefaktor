@@ -334,27 +334,59 @@ def calculate_intersection_area(construction_feature, buffer, buffer_distance, p
     return intersection
 
 
-def remove_geometries_with_small_areas(gdf, area_limit=None):
+def remove_geometries_with_small_areas(gdf, area_limit=None, scope=None):
     """
-    This function checks for geometries with zero area in a GeoDataFrame.
+    This function checks for geometries with small area in a GeoDataFrame and plots them along with the scope.
 
     Parameters:
     gdf (GeoDataFrame): The GeoDataFrame to check.
+    area_limit (float): The minimum area threshold. Geometries with area <= this value will be removed.
+    scope (GeoDataFrame): The scope layer to plot alongside the small geometries.
 
     Returns:
-    GeoDataFrame: The GeoDataFrame with geometries with zero area removed.
+    GeoDataFrame: The GeoDataFrame with geometries with small area removed.
     """
     if area_limit is None:
         area_limit = settings.filter_small_areas_limit
 
-    zero_area = gdf[gdf.geometry.area <= area_limit]
-    if not zero_area.empty:
-        areas = zero_area.geometry.area.tolist()
+    small_area = gdf[gdf.geometry.area <= area_limit]
+    if not small_area.empty:
+        areas = small_area.geometry.area.tolist()
         print(colored(
             f'Warning: Geometries with small area found: {areas}. Removing...', 'red'))
-        pt(zero_area, 'Zero Area Geometries')
-        # plot zero_area
-        zero_area.plot()
+        pt(small_area, 'Small Area Geometries')
+
+        # Plot small_area geometries and scope
+        fig, ax = plt.subplots(figsize=(10, 10))
+
+        if scope is not None and not scope.empty:
+            scope.boundary.plot(ax=ax, color='black',
+                                linestyle='dashed', label='Scope')
+
+        small_area.plot(ax=ax, color='red', alpha=0.5)
+
+        # Mark small geometries with red X
+        for idx, row in small_area.iterrows():
+            centroid = row.geometry.centroid
+            if not centroid.is_empty:
+                ax.plot(centroid.x, centroid.y, 'rx',
+                        markersize=10, markeredgewidth=2)
+            else:
+                print(f"Warning: Empty centroid for geometry at index {idx}")
+
+        ax.set_title("Geometries with Small Areas")
+
+        # Create custom legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='red', edgecolor='red', alpha=0.5, label='Small Geometries')]
+        if scope is not None and not scope.empty:
+            legend_elements.append(
+                Patch(facecolor='none', edgecolor='black', linestyle='dashed', label='Scope'))
+
+        ax.legend(handles=legend_elements)
+
         plt.show()
+
         gdf = gdf[gdf.geometry.area > area_limit]
     return gdf

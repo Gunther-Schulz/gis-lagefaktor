@@ -2,131 +2,114 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap, BoundaryNorm
+import colorsys
 from gis_lagefaktor.config import settings
 import os
+import numpy as np
+import random
+
+
+def generate_distinct_colors(n):
+    hues = np.linspace(0, 1, n, endpoint=False)
+    np.random.shuffle(hues)
+    colors = [colorsys.hsv_to_rgb(h, 0.8, 0.8) for h in hues]
+    return colors
+
+
+def generate_similar_colors(base_color, n):
+    h, s, v = colorsys.rgb_to_hsv(*base_color)
+    colors = [colorsys.hsv_to_rgb((h + 0.05 * i) % 1,
+                                  max(0.4, min(1, s - 0.1 + 0.2 * i / n)),
+                                  max(0.4, min(1, v - 0.1 + 0.2 * i / n)))
+              for i in range(n)]
+    return colors
 
 
 def create_plot(construction_features, compensation_features, interference, scope, output_path, show_plot=False):
-    """
-    This function creates a plot with different layers of geospatial data.
-
-    Parameters:
-    construction_features (GeoDataFrame): The construction features to plot.
-    compensation_features (GeoDataFrame): The compensation features to plot.
-    interference (GeoDataFrame): The interference features to plot.
-    scope (GeoDataFrame): The scope features to plot.
-    show_plot (bool): Whether to display the plot. Defaults to False.
-    """
-
-    # Assuming 'features' is a GeoDataFrame
-    fig, ax = plt.subplots(1, 1)
-
-    column_name = ''
+    fig, ax = plt.subplots(1, 1, figsize=(20, 16))
     handles = []
     labels = []
-    plot_area = False
 
-    # if 'buffer_dis' in construction_features.columns:
+    base_names = construction_features['base_name'].unique()
+    buffer_distances = construction_features['buffer_dis'].unique()
 
-    import colorsys
+    # Generate distinct base colors for each group
+    all_base_colors = generate_distinct_colors(
+        len(base_names) + 1)  # +1 for compensation
+    flachentyp_base_colors = {name: color for name,
+                              color in zip(base_names, all_base_colors[:-1])}
+    compensation_base_color = all_base_colors[-1]
 
     if not construction_features.empty and 'buffer_dis' in construction_features.columns and 'base_name' in construction_features.columns:
-        column_name = 'buffer_dis'
-        buffer_dis_values = construction_features[column_name].unique()
+        handles.append(
+            Patch(facecolor='none', edgecolor='none', label='Flächentypen'))
+        labels.append('Flächentypen')
 
-        # Define a base color for each unique value in 'buffer_dis'
-        base_colors = sns.color_palette("hsv", len(buffer_dis_values))
-        buffer_dis_to_color = {
-            buffer_dis: base_colors[i] for i, buffer_dis in enumerate(buffer_dis_values)}
+        for base_name in base_names:
+            colors = generate_similar_colors(
+                flachentyp_base_colors[base_name], len(buffer_distances))
+            for i, buffer_dis in enumerate(buffer_distances):
+                subgroup = construction_features[(construction_features['base_name'] == base_name) &
+                                                 (construction_features['buffer_dis'] == buffer_dis)]
+                if not subgroup.empty:
+                    color = colors[i]
+                    subgroup.plot(ax=ax, color=color,
+                                  edgecolor='black', linewidth=0.5)
+                    handles.append(Patch(color=color))
+                    labels.append(f"{base_name} - {buffer_dis}")
 
-        # Plot 'buffer_dis' with the base color, using different shades for each 'base_name'
-        handles = []
-        labels = []
-        for buffer_dis, group in construction_features.groupby(column_name):
-            base_names = group['base_name'].unique()
-            # Create a colormap for each 'base_name' within the same 'buffer_dis'
-            base_color = buffer_dis_to_color[buffer_dis]
-            hue = colorsys.rgb_to_hsv(*base_color)[0]  # Get the hue component
-            cmap = sns.cubehelix_palette(
-                len(base_names), start=hue, dark=0.5, light=0.8)
-            base_name_to_color = {base_name: cmap[i]
-                                  for i, base_name in enumerate(base_names)}
-            for base_name, subgroup in group.groupby('base_name'):
-                subgroup.plot(
-                    ax=ax, color=base_name_to_color[base_name], edgecolor='black', linewidth=0.5)
-                # Add a legend entry for each unique 'base_name'
-                handles.append(Patch(color=base_name_to_color[base_name]))
-                labels.append(f"{buffer_dis} - {base_name}")
-
-        # Add area labels
-        if plot_area:
-            for x, y, label in zip(construction_features.geometry.centroid.x, construction_features.geometry.centroid.y, construction_features.geometry.area):
-                ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
-
-        ax.legend(handles=handles, labels=labels, loc='best')
+    handles.append(Patch(facecolor='none', edgecolor='none', label=''))
+    labels.append('')
 
     if not compensation_features.empty and 'compensat' in compensation_features.columns:
-        # if 'compensat' in compensation_features.columns:
-        column_name = 'compensat'
-        # Define the color map and norm
-        colors = ['red', 'green', 'blue']  # replace with the colors you want
-        bounds = [1, 2, 3, 4]  # replace with the boundaries you want
-        cmap = ListedColormap(colors)
-        norm = BoundaryNorm(bounds, cmap.N)
-
-        # Plot the GeoDataFrame without the legend
-        compensation_features.plot(
-            column=column_name, ax=ax, cmap=cmap, norm=norm, edgecolor='black', linewidth=0.5)
-
-        # Add area labels
-        if plot_area:
-            for x, y, label in zip(construction_features.geometry.centroid.x, construction_features.geometry.centroid.y, construction_features.geometry.area):
-                ax.annotate(text=f'{int(label)}', xy=(x, y), fontsize=4)
-        # Get the unique values in the column
-        unique_values = compensation_features[column_name].unique()
-
-        # Create a legend entry for each unique value
-        compensat_patches = [Patch(color=cmap(
-            norm(value)), label=value) for value in unique_values]
-
         handles.append(Patch(facecolor='none', edgecolor='none',
-                       label='Kompensationswert'))
-        handles.extend(compensat_patches)
-        labels.append('Kompensationswert')
-        labels.extend(unique_values)
+                       label='Kompensationswerte'))
+        labels.append('Kompensationswerte')
+
+        compensation_values = compensation_features['compensat'].unique()
+        colors = generate_similar_colors(
+            compensation_base_color, len(buffer_distances))
+
+        for compensat in compensation_values:
+            for i, buffer_dis in enumerate(buffer_distances):
+                subgroup = compensation_features[(compensation_features['compensat'] == compensat) &
+                                                 (compensation_features['buffer_dis'] == buffer_dis)]
+                if not subgroup.empty:
+                    color = colors[i]
+                    subgroup.plot(ax=ax, color=color,
+                                  edgecolor='black', linewidth=0.5)
+                    handles.append(Patch(color=color))
+                    labels.append(f"{compensat} - {buffer_dis}")
+
+    handles.append(Patch(facecolor='none', edgecolor='none', label=''))
+    labels.append('')
 
     if not interference.empty:
-        # Plot 'interference' on the same axes
         interference.plot(ax=ax, color='cyan')
-
-        # Create a legend entry for 'interference'
-        interference_patch = Patch(color='cyan', label='Störungsquelle')
-
-        handles.append(
-            Patch(facecolor='none', edgecolor='none', label='Störungsquelle'))
-        handles.append(interference_patch)
-        labels.append('')
+        handles.append(Patch(color='cyan', label='Störungsquelle'))
         labels.append('Störungsquelle')
 
     if not scope.empty:
-        scope.boundary.plot(ax=ax, color='black', linestyle='dashed')
+        strong_colors = ['black', 'red', 'blue', 'green', 'purple', 'orange']
+        for idx, row in scope.iterrows():
+            color = strong_colors[idx % len(strong_colors)]
+            ax.plot(*row.geometry.boundary.xy, color=color,
+                    linestyle='dashed', linewidth=2, dashes=(5, 5))
+            handles.append(Patch(color=color, linestyle='dashed', fill=False))
+            labels.append(
+                row['name'] if 'name' in row else f'Geltungsbereich {idx+1}')
 
-        scope_patch = Patch(
-            color='black', label='Geltungsbereich', linestyle='dashed', fill=False)
-
-        handles.append(
-            Patch(facecolor='none', edgecolor='none', label='Geltungsbereich'))
-        handles.append(scope_patch)
-        labels.append('')
-        labels.append('Geltungsbereich')
-
-    # Create a single legend for all entries
     plt.legend(handles=handles, labels=labels,
                loc='upper left', bbox_to_anchor=(1, 1))
-
     plt.title(settings.project_name)
-    # write plot to file
-    plt.savefig(os.path.join(output_path, settings.project_name +
-                '_plot.png'), dpi=600, bbox_inches='tight')
+    plt.tight_layout()
+
+    crs = construction_features.crs
+    if crs:
+        fig.text(
+            0.5, -0.02, f"Coordinate System: {crs.to_string()}", fontsize=8, ha='center', va='top')
+
+    plt.savefig(os.path.join(output_path, settings.project_name + '_plot.png'),
+                dpi=600, bbox_inches='tight', pad_inches=0.1)
     if show_plot:
         plt.show()
