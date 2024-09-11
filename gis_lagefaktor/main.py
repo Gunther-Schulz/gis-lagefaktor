@@ -301,6 +301,14 @@ print("Processing parcel features...")
 parcel_features = get_parcel_features(PARCEL_PATH)
 parcel_features = filter_features(scope, parcel_features)
 
+# At the beginning of your script, after loading parcel_features
+if parcel_features.crs is None:
+    parcel_features = parcel_features.set_crs(config.settings.crs)
+
+# Ensure all feature sets have the same CRS
+construction_features = construction_features.to_crs(parcel_features.crs)
+compensatory_features = compensatory_features.to_crs(parcel_features.crs)
+
 
 def calculate_overlap_area(feature1, feature2):
     overlap = gpd.overlay(feature1, feature2, how='intersection')
@@ -377,7 +385,6 @@ def plot_parcels_with_features(parcel_features, construction_features, compensat
     ax1.set_title('Parcels with Construction Features')
 
     # Plot parcels with compensatory features
-    # Changed from ax=2 to ax=ax2
     parcel_features.plot(ax=ax2, color='lightgrey', edgecolor='black')
     compensatory_features.plot(ax=ax2, color='green', alpha=0.5)
     ax2.set_title('Parcels with Compensatory Features')
@@ -392,9 +399,36 @@ def plot_parcels_with_features(parcel_features, construction_features, compensat
                         fontsize=8, color='black', ha='center', va='center')
 
     plt.tight_layout()
-    plt.show()  # Show the plot instead of saving it
-    plt.close(fig)  # Close the figure to free up memory
+    plt.show()
+
+# Debugging function to check for small overlaps
 
 
+def check_overlaps(parcel_features, feature_gdf, feature_type):
+    for idx, parcel in parcel_features.iterrows():
+        overlap = gpd.overlay(gpd.GeoDataFrame([parcel], crs=parcel_features.crs),
+                              feature_gdf, how='intersection')
+        if not overlap.empty:
+            overlap['area'] = overlap.geometry.area
+            print(
+                f"Overlap detected for parcel {parcel['label']} with {feature_type}:")
+            print(overlap[['area']])
+            print(f"Total overlap area: {overlap['area'].sum():.2f}")
+            print("---")
+
+
+# Run the plot function
 plot_parcels_with_features(
     parcel_features, construction_features, compensatory_features)
+
+# Check for small overlaps
+print("Checking overlaps with construction features:")
+check_overlaps(parcel_features, construction_features, "construction")
+
+print("\nChecking overlaps with compensatory features:")
+check_overlaps(parcel_features, compensatory_features, "compensatory")
+
+# Print the total area for each parcel in the parcel report
+print("\nParcel report areas:")
+for _, row in parcel_report.iterrows():
+    print(f"Parcel {row['label']}: Construction area = {row['construction_area']:.2f}, Compensatory area = {row['compensatory_area']:.2f}")
