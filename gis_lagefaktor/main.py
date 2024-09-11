@@ -3,6 +3,7 @@
 
 import argparse
 
+import openpyxl
 import yaml
 from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length, get_parcel_features
 from gis_lagefaktor.feature_processing import process_features, add_compensatory_score, process_and_separate_buffer_zones
@@ -334,3 +335,27 @@ def generate_parcel_report(parcel_features, construction_features, compensatory_
 print("Generating parcel report...")
 parcel_report = generate_parcel_report(
     parcel_features, construction_features, compensatory_features)
+
+
+def add_parcel_report_to_excel(parcel_report, output_dir):
+    for filename in ['Construction', 'Compensatory']:
+        excel_path = os.path.join(
+            output_dir, f"{config.settings.project_name}_{filename}.xlsx")
+        if os.path.exists(excel_path):
+            # Read the existing Excel file
+            book = openpyxl.load_workbook(excel_path)
+
+            # Create a new ExcelWriter object with the existing workbook
+            with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
+                # Write parcel report to a new sheet
+                parcel_report.to_excel(
+                    writer, sheet_name='Parcel Report', index=False)
+
+            print(f"Parcel report added to {excel_path}")
+        else:
+            print(
+                f"Warning: {excel_path} not found. Skipping parcel report addition.")
+
+
+# Add this at the end of main.py, after the parcel report generation
+add_parcel_report_to_excel(parcel_report, OUTPUT_PATH)
