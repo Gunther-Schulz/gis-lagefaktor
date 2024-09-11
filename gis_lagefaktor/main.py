@@ -4,7 +4,7 @@
 import argparse
 
 import yaml
-from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length
+from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length, get_parcel_features
 from gis_lagefaktor.feature_processing import process_features, add_compensatory_score, process_and_separate_buffer_zones
 from gis_lagefaktor.geospatial_ops import get_buffers, filter_features
 from gis_lagefaktor.visualization import create_plot
@@ -20,6 +20,8 @@ from gis_lagefaktor.feature_processing import add_compensatory_value, add_constr
 from termcolor import colored
 import warnings
 import gis_lagefaktor.config as config
+import geopandas as gpd
+import pandas as pd
 
 warnings.showwarning = custom_warning
 
@@ -65,10 +67,11 @@ PROTECTED_PATH = os.path.join(dir_path, 'protected')
 OUTPUT_PATH = os.path.join(dir_path, 'output')
 DEBUG_PATH = os.path.join(dir_path, 'debug')
 INTERFERENCE_PATH = os.path.join(dir_path, 'interference')
+PARCEL_PATH = os.path.join(dir_path, 'parcel')
 
 # List of directories to create
 dirs = [dir_path, SCOPE_PATH, CHANGING_PATH, CONSTRUCTION_PATH, UNCHANGING_PATH,
-        COMPENSATORY_PATH, PROTECTED_PATH, OUTPUT_PATH, DEBUG_PATH, INTERFERENCE_PATH]
+        COMPENSATORY_PATH, PROTECTED_PATH, OUTPUT_PATH, DEBUG_PATH, INTERFERENCE_PATH, PARCEL_PATH]
 
 # If the --new argument is provided, create the project directory and all subdirectories
 if args.new:
@@ -290,3 +293,44 @@ def write_output_json_and_excel(total_score, features, filename, output_dir):
         json.dump(output_data.to_dict(orient='records'), f)
 
     print(f"Output written to {excel_path} and {json_path}")
+
+
+print("Processing parcel features...")
+parcel_features = get_parcel_features(PARCEL_PATH)
+parcel_features = filter_features(scope, parcel_features)
+
+
+def calculate_overlap_area(feature1, feature2):
+    overlap = gpd.overlay(feature1, feature2, how='intersection')
+    overlap['overlap_area'] = overlap.geometry.area
+    return overlap
+
+
+def generate_parcel_report(parcel_features, construction_features, compensatory_features):
+    construction_overlap = calculate_overlap_area(
+        parcel_features, construction_features)
+    compensatory_overlap = calculate_overlap_area(
+        parcel_features, compensatory_features)
+
+    report = []
+    for label in parcel_features['label'].unique():
+        parcel = parcel_features[parcel_features['label'] == label]
+        construction_area = construction_overlap[construction_overlap['label'] == label]['overlap_area'].sum(
+        )
+        compensatory_area = compensatory_overlap[compensatory_overlap['label'] == label]['overlap_area'].sum(
+        )
+
+        report.append({
+            'label': label,
+            'total_area': parcel.geometry.area.sum(),
+            'construction_area': construction_area,
+            'compensatory_area': compensatory_area
+        })
+
+    return pd.DataFrame(report)
+
+
+# Add this after processing construction and compensatory features
+print("Generating parcel report...")
+parcel_report = generate_parcel_report(
+    parcel_features, construction_features, compensatory_features)

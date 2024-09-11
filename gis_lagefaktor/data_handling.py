@@ -221,3 +221,36 @@ def write_output_json_and_excel(total_score, data, filename='output', output_dir
 
     df.to_excel(os.path.join(output_dir, settings.project_name + '_' +
                 filename + '.xlsx'), index=False)
+
+
+def get_parcel_features(dir):
+    print(colored(
+        f'Reading parcel shapefiles from directory "{os.path.basename(dir)}":', 'yellow', attrs=['dark']))
+    shapefiles = glob.glob(f"{dir}/**/*.shp", recursive=True)
+
+    if not shapefiles:
+        print(
+            colored(f"No parcel shapefiles found in directory {dir}.", 'yellow'))
+        return gpd.GeoDataFrame(columns=['geometry', 'label'], crs=settings.crs)
+
+    features = []
+    for shapefile in shapefiles:
+        feature = gpd.read_file(shapefile)
+        feature = feature.to_crs(settings.crs)
+        if 'label' not in feature.columns:
+            print(colored(
+                f"Warning: 'label' column not found in {shapefile}. Using 'FLURSTKENN' column instead.", 'yellow'))
+            if 'FLURSTKENN' in feature.columns:
+                feature = feature.rename(columns={'FLURSTKENN': 'label'})
+            else:
+                print(colored(
+                    f"Error: Neither 'label' nor 'FLURSTKENN' column found in {shapefile}. Skipping this file.", 'red'))
+                continue
+        feature = feature[['geometry', 'label']]
+        features.append(feature)
+
+    if not features:
+        return gpd.GeoDataFrame(columns=['geometry', 'label'], crs=settings.crs)
+
+    parcel_features = pd.concat(features, ignore_index=True)
+    return parcel_features
