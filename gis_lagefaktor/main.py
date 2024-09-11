@@ -345,10 +345,16 @@ def add_parcel_report_to_excel(parcel_report, output_dir):
             # Read the existing Excel file
             book = openpyxl.load_workbook(excel_path)
 
+            # Filter and sort the parcel report
+            area_column = f"{filename.lower()}_area"
+            filtered_report = parcel_report[['label', area_column]]
+            filtered_report = filtered_report[filtered_report[area_column] > 0]
+            filtered_report = filtered_report.sort_values('label')
+
             # Create a new ExcelWriter object with the existing workbook
             with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
-                # Write parcel report to a new sheet
-                parcel_report.to_excel(
+                # Write filtered parcel report to a new sheet
+                filtered_report.to_excel(
                     writer, sheet_name='Parcel Report', index=False)
 
             print(f"Parcel report added to {excel_path}")
