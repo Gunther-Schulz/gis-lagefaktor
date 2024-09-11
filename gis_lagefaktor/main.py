@@ -309,10 +309,15 @@ if parcel_features.crs is None:
 construction_features = construction_features.to_crs(parcel_features.crs)
 compensatory_features = compensatory_features.to_crs(parcel_features.crs)
 
+# Add this constant near the top of your script, after imports
+OVERLAP_AREA_THRESHOLD = 0.01  # Adjust this value as needed
+
 
 def calculate_overlap_area(feature1, feature2):
     overlap = gpd.overlay(feature1, feature2, how='intersection')
     overlap['overlap_area'] = overlap.geometry.area
+    # Filter out tiny overlaps
+    overlap = overlap[overlap['overlap_area'] > OVERLAP_AREA_THRESHOLD]
     return overlap
 
 
@@ -340,13 +345,14 @@ def generate_parcel_report(parcel_features, construction_features, compensatory_
     return pd.DataFrame(report)
 
 
-# Add this after processing construction and compensatory features
-print("Generating parcel report...")
+# After generating the parcel report
 parcel_report = generate_parcel_report(
     parcel_features, construction_features, compensatory_features)
 
+# Update the Excel files with the new parcel report
 
-def add_parcel_report_to_excel(parcel_report, output_dir):
+
+def update_excel_with_parcel_report(parcel_report, output_dir):
     for filename in ['Construction', 'Compensatory']:
         excel_path = os.path.join(
             output_dir, f"{config.settings.project_name}_{filename}.xlsx")
@@ -360,20 +366,32 @@ def add_parcel_report_to_excel(parcel_report, output_dir):
             filtered_report = filtered_report[filtered_report[area_column] > 0]
             filtered_report = filtered_report.sort_values('label')
 
-            # Create a new ExcelWriter object with the existing workbook
-            with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
-                # Write filtered parcel report to a new sheet
-                filtered_report.to_excel(
-                    writer, sheet_name='Parcel Report', index=False)
+            # Remove existing 'Parcel Report' sheet if it exists
+            if 'Parcel Report' in book.sheetnames:
+                book.remove(book['Parcel Report'])
 
-            print(f"Parcel report added to {excel_path}")
-        else:
-            print(
-                f"Warning: {excel_path} not found. Skipping parcel report addition.")
+            # Create a new sheet for the parcel report
+            sheet = book.create_sheet('Parcel Report')
+
+            # Write headers
+            sheet.append(['Parcel', 'Area'])
+
+            # Write data
+            for _, row in filtered_report.iterrows():
+                sheet.append([row['label'], row[area_column]])
+
+            # Save the workbook
+            book.save(excel_path)
+            print(f"Updated parcel report in {excel_path}")
 
 
-# Add this at the end of main.py, after the parcel report generation
-add_parcel_report_to_excel(parcel_report, OUTPUT_PATH)
+# Call the function to update Excel files
+update_excel_with_parcel_report(parcel_report, OUTPUT_PATH)
+
+# Print the updated parcel report for verification
+# print("\nUpdated Parcel report areas:")
+# for _, row in parcel_report.iterrows():
+#     print(f"Parcel {row['label']}: Construction area = {row['construction_area']:.2f}, Compensatory area = {row['compensatory_area']:.2f}")
 
 
 def plot_parcels_with_features(parcel_features, construction_features, compensatory_features):
@@ -421,14 +439,14 @@ def check_overlaps(parcel_features, feature_gdf, feature_type):
 plot_parcels_with_features(
     parcel_features, construction_features, compensatory_features)
 
-# Check for small overlaps
-print("Checking overlaps with construction features:")
-check_overlaps(parcel_features, construction_features, "construction")
+# # Check for small overlaps
+# print("Checking overlaps with construction features:")
+# check_overlaps(parcel_features, construction_features, "construction")
 
-print("\nChecking overlaps with compensatory features:")
-check_overlaps(parcel_features, compensatory_features, "compensatory")
+# print("\nChecking overlaps with compensatory features:")
+# check_overlaps(parcel_features, compensatory_features, "compensatory")
 
-# Print the total area for each parcel in the parcel report
-print("\nParcel report areas:")
-for _, row in parcel_report.iterrows():
-    print(f"Parcel {row['label']}: Construction area = {row['construction_area']:.2f}, Compensatory area = {row['compensatory_area']:.2f}")
+# # Print the total area for each parcel in the parcel report
+# print("\nParcel report areas:")
+# for _, row in parcel_report.iterrows():
+#     print(f"Parcel {row['label']}: Construction area = {row['construction_area']:.2f}, Compensatory area = {row['compensatory_area']:.2f}")
