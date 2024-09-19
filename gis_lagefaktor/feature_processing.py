@@ -66,38 +66,54 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     - Processed GeoDataFrame.
     """
 
+    # Check for empty or invalid geometries in input GeoDataFrames
+    def check_geometries(gdf, name):
+        if gdf.empty:
+            print(f"Warning: {name} GeoDataFrame is empty.")
+        elif gdf.geometry.is_empty.any() or gdf.geometry.is_valid.all() == False:
+            print(f"Warning: {name} GeoDataFrame contains empty or invalid geometries.")
+            print(f"Invalid geometries in {name}:", gdf[~gdf.geometry.is_valid])
+
+    check_geometries(base_features, "base_features")
+    check_geometries(unchanged_features, "unchanged_features")
+    check_geometries(changing_features, "changing_features")
+
     # Rename 'name' column in changing_features
-    changing_features = changing_features.rename(
-        columns={'name': 'base_name'})
+    changing_features = changing_features.rename(columns={'name': 'base_name'})
 
     # Punch holes
-    changing_features = gpd.overlay(
-        changing_features, unchanged_features, how='difference')
+    print("Performing overlay operation: changing_features with unchanged_features")
+    changing_features = gpd.overlay(changing_features, unchanged_features, how='difference')
+    check_geometries(changing_features, "changing_features after overlay with unchanged_features")
+
+    print(f"Base features count: {len(base_features)}")
+    print(f"Base features types: {base_features['name'].unique()}")
+    print(f"Changing features count: {len(changing_features)}")
+    print(f"Changing features types: {changing_features['base_name'].unique()}")
 
     # Overlay base_features with changing_features
-    intersected_features = gpd.overlay(
-        base_features, changing_features, how='intersection')
+    print("Performing overlay operation: base_features with changing_features")
+    try:
+        intersected_features = gpd.overlay(base_features, changing_features, how='intersection')
+        check_geometries(intersected_features, "intersected_features")
+    except Exception as e:
+        print(f"Error during overlay operation: {str(e)}")
+        print("Base features:")
+        print(base_features[['name', 'geometry']].head())
+        print("\nChanging features:")
+        print(changing_features[['base_name', 'geometry']].head())
+        return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
 
-    # Select only the columns from base_features and add 'base_name'
-    # intersected_features = intersected_features[base_features.columns]
-
-    # intersected_features['base_name'] = changing_features['base_name']
-
-    # # Flatten the result into a single geometry and keep the first unique value for each group
-    # base_features = intersected_features.dissolve(
-    #     by='name', aggfunc='first').explode(index_parts=False)
-
-    # # Reset the index
-    # base_features.reset_index(drop=False, inplace=True)
-
-    # # Merge the base_features with the changing_features
-    # base_features['base_value'] = base_features['base_name'].map(
-    #     lambda x: get_value_with_warning(values, x))
+    # Check if the result is empty
+    if intersected_features.empty:
+        print("Warning: The result of the overlay operation is empty.")
+        print(f"Base features involved: {base_features['name'].unique()}")
+        print(f"Changing features involved: {changing_features['base_name'].unique()}")
+        return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
 
     intersected_features['base_value'] = intersected_features['base_name'].map(
         lambda x: get_value_with_warning(values, x))
 
-    # return base_features
     return intersected_features
 
 
