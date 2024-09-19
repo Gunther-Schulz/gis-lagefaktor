@@ -7,6 +7,8 @@ from gis_lagefaktor.geospatial_ops import calculate_overlay, clean_geometries, f
 from gis_lagefaktor.data_handling import get_value_with_warning, get_features
 from gis_lagefaktor.lagefaktor import add_lagefaktor_values
 from gis_lagefaktor.config import settings
+import warnings
+from shapely.validation import explain_validity
 
 
 def add_compensatory_value(compensatory_features, protected_area_features):
@@ -94,27 +96,82 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
     # Overlay base_features with changing_features
     print("Performing overlay operation: base_features with changing_features")
     try:
-        intersected_features = gpd.overlay(base_features, changing_features, how='intersection')
+        # Check for valid geometries
+        base_features = base_features[base_features.geometry.is_valid]
+        changing_features = changing_features[changing_features.geometry.is_valid]
+
+        # Attempt to fix any remaining invalid geometries
+        base_features['geometry'] = base_features.geometry.buffer(0)
+        changing_features['geometry'] = changing_features.geometry.buffer(0)
+
+        # Remove None geometries
+        base_features = base_features[base_features.geometry.notna()]
+        changing_features = changing_features[changing_features.geometry.notna()]
+
+        print("Base features geometry types:")
+        print(base_features.geometry.type.value_counts())
+        print("Changing features geometry types:")
+        print(changing_features.geometry.type.value_counts())
+
+        print("Sample of base features:")
+        print(base_features[['name', 'geometry']].head())
+        print("Sample of changing features:")
+        print(changing_features[['base_name', 'geometry']].head())
+
+        print("Base features total area:", base_features.geometry.area.sum())
+        print("Changing features total area:", changing_features.geometry.area.sum())
+
+        print("Checking geometry validity before overlay:")
+        print("Base features invalid geometries:")
+        for idx, geom in base_features.geometry.items():
+            if not geom.is_valid:
+                print(f"Index {idx}: {explain_validity(geom)}")
+        
+        print("Changing features invalid geometries:")
+        for idx, geom in changing_features.geometry.items():
+            if not geom.is_valid:
+                print(f"Index {idx}: {explain_validity(geom)}")
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            intersected_features = gpd.overlay(base_features, changing_features, how='intersection')
+            for warning in w:
+                print(f"Warning during overlay: {warning.message}")
+
+        print("Checking geometry types after overlay:")
+        print(intersected_features.geometry.type.value_counts())
+
+        print("Intersected features total area:", intersected_features.geometry.area.sum())
+        print("Intersected features count:", len(intersected_features))
+
+        if intersected_features.empty:
+            print("Warning: The intersection result is empty.")
+            return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
+        else:
+            print("Intersected features types:")
+            print(intersected_features.geometry.type.value_counts())
+
         check_geometries(intersected_features, "intersected_features")
+
+        intersected_features['base_value'] = intersected_features['base_name'].map(
+            lambda x: get_value_with_warning(values, x))
+
+        return intersected_features
+
     except Exception as e:
         print(f"Error during overlay operation: {str(e)}")
         print("Base features:")
         print(base_features[['name', 'geometry']].head())
         print("\nChanging features:")
         print(changing_features[['base_name', 'geometry']].head())
+        
+        # Additional debugging information
+        print("\nBase features with invalid geometries:")
+        print(base_features[~base_features.geometry.is_valid])
+        print("\nChanging features with invalid geometries:")
+        print(changing_features[~changing_features.geometry.is_valid])
+        
         return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
-
-    # Check if the result is empty
-    if intersected_features.empty:
-        print("Warning: The result of the overlay operation is empty.")
-        print(f"Base features involved: {base_features['name'].unique()}")
-        print(f"Changing features involved: {changing_features['base_name'].unique()}")
-        return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
-
-    intersected_features['base_value'] = intersected_features['base_name'].map(
-        lambda x: get_value_with_warning(values, x))
-
-    return intersected_features
 
 
 def add_construction_score(features, grz):
