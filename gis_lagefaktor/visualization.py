@@ -100,7 +100,8 @@ def create_plot(construction_features, compensation_features, interference, scop
                 row['name'] if 'name' in row else f'Geltungsbereich {idx+1}')
 
     plt.legend(handles=handles, labels=labels,
-               loc='upper left', bbox_to_anchor=(1, 1))
+               loc='upper left', bbox_to_anchor=(1, 1), fontsize=16,  # Increased fontsize to 16
+               markerscale=2.0, handlelength=4, handletextpad=2.0, borderpad=2.0)  # Further adjusted legend size
     plt.title(settings.project_name)
     plt.tight_layout()
 
