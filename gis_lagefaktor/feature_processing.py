@@ -177,7 +177,7 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
 def add_construction_score(features, grz, output_dir, project_name):
     """
     Calculate the total final value based on features and GRZ factors.
-    Now includes protocol writing for intermediate calculations.
+    Now includes enhanced protocol writing for intermediate calculations.
     """
     scores = []
     for _, feature in features.iterrows():
@@ -191,9 +191,10 @@ def add_construction_score(features, grz, output_dir, project_name):
         score = round(total_value_adjusted, 2)
         scores.append(score)
         
-        # Write calculation steps to protocol
+        # Enhanced protocol message with feature identification
         protocol_message = (
             f"Construction Score Calculation:\n"
+            f"  Feature Type: {feature['name']}\n"  # Added feature type
             f"  Area: {area:.2f}\n"
             f"  Base Value: {base_value}\n"
             f"  Lagefaktor: {lagefaktor}\n"
@@ -397,9 +398,10 @@ def calculate_compensatory_score(row, current_features, output_dir, project_name
             
         final_v = final_v * prot_value
         
-        # Write calculation steps to protocol
+        # Enhanced protocol message with feature identification
         protocol_message = (
             f"Compensatory Score Calculation:\n"
+            f"  Feature Type: {row['name']}\n"  # Added feature type
             f"  Area: {area:.2f}\n"
             f"  Compensatory Value: {compensat}\n"
             f"  Base Value: {base_value}\n"
@@ -412,8 +414,9 @@ def calculate_compensatory_score(row, current_features, output_dir, project_name
         
         return round(final_v, 2)
     else:
+        # Enhanced ineligible feature message
         write_protocol(
-            f"Feature marked as not eligible - Score: 0\n-------------------", 
+            f"Feature marked as not eligible - Feature Type: {row['name']} - Score: 0\n-------------------", 
             output_dir, 
             project_name
         )
