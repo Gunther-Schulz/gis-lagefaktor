@@ -205,7 +205,7 @@ def create_feature_identifier(feature):
 
 def calculate_compensatory_score(row, current_features, output_dir, project_name):
     """
-    Calculate compensatory score with protocol logging.
+    Calculate compensatory score with detailed step-by-step protocol logging.
     """
     if row['eligible'] == True:
         area = row.geometry.area
@@ -216,10 +216,10 @@ def calculate_compensatory_score(row, current_features, output_dir, project_name
         # Create spatial identifier
         feature_id = create_feature_identifier(row)
         
-        # Step-by-step calculation
+        # Step-by-step calculation with all intermediate values
         initial_value = compensat - base_value
+        area_value = area
         adjusted_value = initial_value * area
-        final_v = adjusted_value * lagefaktor
         
         if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
             prot_value = get_value_with_warning(
@@ -229,24 +229,25 @@ def calculate_compensatory_score(row, current_features, output_dir, project_name
         else:
             prot_value = 1
             
-        final_v *= prot_value
+        final_v = adjusted_value * lagefaktor
+        protected_final_v = final_v * prot_value
         
-        # Detailed protocol message
+        # Detailed protocol message showing all calculation steps
         protocol_message = (
             f"Compensatory Score Calculation:\n"
             f"  Feature ID: {feature_id}\n"
             f"  Feature Type: {row['name']}\n"
             f"  Area: {area:.2f}\n"
-            f"  Initial Value (Compensatory - Base): {initial_value}\n"
-            f"  Adjusted Value (Initial * Area): {adjusted_value:.2f}\n"
-            f"  Final Value (Adjusted * Lagefaktor): {final_v:.2f}\n"
-            f"  Protection Value: {prot_value}\n"
-            f"  Final Score: {final_v:.2f}\n"
+            f"  Step 1 (Compensatory - Base): {compensat} - {base_value} = {initial_value}\n"
+            f"  Step 2 (Initial * Area): {initial_value} * {area_value:.2f} = {adjusted_value:.2f}\n"
+            f"  Step 3 (Adjusted * Lagefaktor): {adjusted_value:.2f} * {lagefaktor} = {final_v:.2f}\n"
+            f"  Step 4 (Final * Protection): {final_v:.2f} * {prot_value} = {protected_final_v:.2f}\n"
+            f"  Final Score: {protected_final_v:.2f}\n"
             f"-------------------"
         )
         write_protocol(protocol_message, output_dir, project_name)
         
-        return round(final_v, 2)
+        return round(protected_final_v, 2)
     else:
         feature_id = create_feature_identifier(row)
         write_protocol(
@@ -275,7 +276,7 @@ def add_compensatory_score(features, scope, output_dir, project_name):
 def add_construction_score(features, grz, output_dir, project_name):
     """
     Calculate the total final value based on features and GRZ factors.
-    Now includes enhanced protocol writing for intermediate calculations.
+    Now includes detailed step-by-step calculation protocol.
     """
     scores = []
     for _, feature in features.iterrows():
@@ -286,23 +287,31 @@ def add_construction_score(features, grz, output_dir, project_name):
         # Create spatial identifier
         feature_id = create_feature_identifier(feature)
         
-        # Step-by-step calculation
-        initial_value = base_value * lagefaktor * area
+        # Step-by-step calculation with all intermediate values
+        base_times_lage = base_value * lagefaktor
+        initial_value = base_times_lage * area
+        
         factor_a, factor_b, factor_c = settings.grz_factors[grz]
         adjusted_value = initial_value * factor_a
-        final_value = adjusted_value * (factor_b + factor_c)
+        
+        factor_sum = factor_b + factor_c
+        final_value = adjusted_value * factor_sum
         score = round(final_value, 2)
         scores.append(score)
         
-        # Detailed protocol message
+        # Detailed protocol message showing all calculation steps
         protocol_message = (
             f"Construction Score Calculation:\n"
             f"  Feature ID: {feature_id}\n"
             f"  Feature Type: {feature['name']}\n"
             f"  Area: {area:.2f}\n"
-            f"  Initial Value (Base * Lagefaktor * Area): {initial_value:.2f}\n"
-            f"  Adjusted Value (Initial * Factor A): {adjusted_value:.2f}\n"
-            f"  Final Value (Adjusted * (Factor B + Factor C)): {final_value:.2f}\n"
+            f"  Base Value: {base_value}\n"
+            f"  Lagefaktor: {lagefaktor}\n"
+            f"  Step 1 (Base * Lagefaktor): {base_times_lage:.2f}\n"
+            f"  Step 2 (Step 1 * Area) = Initial Value: {initial_value:.2f}\n"
+            f"  Step 3 (Initial * Factor A [{factor_a}]) = Adjusted Value: {adjusted_value:.2f}\n"
+            f"  Step 4 (Factor B + Factor C = {factor_b} + {factor_c}): {factor_sum:.2f}\n"
+            f"  Step 5 (Adjusted * (B+C)) = Final Value: {final_value:.2f}\n"
             f"  GRZ Factors (a,b,c): {factor_a}, {factor_b}, {factor_c}\n"
             f"  Final Score: {score}\n"
             f"-------------------"
