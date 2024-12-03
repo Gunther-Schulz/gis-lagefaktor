@@ -174,6 +174,104 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
         return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
 
 
+def create_feature_identifier(feature):
+    """
+    Creates a meaningful identifier for a feature based on its characteristics.
+    """
+    # Get centroid coordinates for spatial reference
+    centroid = feature.geometry.centroid
+    x, y = round(centroid.x), round(centroid.y)
+    
+    # Create identifier using feature type, buffer distance, and location
+    area = feature.geometry.area
+    feature_type = feature['name']
+    buffer_dist = feature.get('buffer_dis', 'no_buffer')
+    
+    # Match the legend categories
+    if feature_type == "Acker" and buffer_dist == "<100":
+        category = "Acker - <100"
+    elif feature_type == "Acker" and buffer_dist == ">100<625":
+        category = "Acker - >100<625"
+    elif feature_type == "Grünland" and buffer_dist == "<100":
+        category = "Grünland - <100"
+    elif feature_type == "Grünland" and buffer_dist == ">100<625":
+        category = "Grünland - >100<625"
+    else:
+        category = f"{feature_type} - {buffer_dist}"
+    
+    identifier = f"{category}_{area:.0f}m²_at_{x}_{y}"
+    return identifier
+
+
+def calculate_compensatory_score(row, current_features, output_dir, project_name):
+    """
+    Calculate compensatory score with protocol logging.
+    """
+    if row['eligible'] == True:
+        area = row.geometry.area
+        compensat = row['compensat']
+        base_value = row['base_value']
+        lagefaktor = row['lagefaktor']
+        
+        # Create spatial identifier
+        feature_id = create_feature_identifier(row)
+        
+        # Step-by-step calculation
+        initial_value = compensat - base_value
+        adjusted_value = initial_value * area
+        final_v = adjusted_value * lagefaktor
+        
+        if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
+            prot_value = get_value_with_warning(
+                settings.projects[settings.project_name].compensatory_protected_values, 
+                row['prot_name']
+            )
+        else:
+            prot_value = 1
+            
+        final_v *= prot_value
+        
+        # Detailed protocol message
+        protocol_message = (
+            f"Compensatory Score Calculation:\n"
+            f"  Feature ID: {feature_id}\n"
+            f"  Feature Type: {row['name']}\n"
+            f"  Area: {area:.2f}\n"
+            f"  Initial Value (Compensatory - Base): {initial_value}\n"
+            f"  Adjusted Value (Initial * Area): {adjusted_value:.2f}\n"
+            f"  Final Value (Adjusted * Lagefaktor): {final_v:.2f}\n"
+            f"  Protection Value: {prot_value}\n"
+            f"  Final Score: {final_v:.2f}\n"
+            f"-------------------"
+        )
+        write_protocol(protocol_message, output_dir, project_name)
+        
+        return round(final_v, 2)
+    else:
+        feature_id = create_feature_identifier(row)
+        write_protocol(
+            f"Feature marked as not eligible - Feature ID: {feature_id} - Feature Type: {row['name']} - Score: 0\n-------------------", 
+            output_dir, 
+            project_name
+        )
+        return 0
+
+
+def add_compensatory_score(features, scope, output_dir, project_name):
+    """
+    This function adds compensatory scores to a GeoDataFrame of features.
+    """
+    pt(features)
+    all_features = []
+    for file in features['name'].unique():
+        current_features = features[features['name'] == file].copy()
+        current_features['score'] = current_features.apply(
+            lambda row: round(calculate_compensatory_score(row, current_features, output_dir, project_name), 2), axis=1)
+        all_features.append(current_features)
+
+    return pd.concat(all_features, ignore_index=True)
+
+
 def add_construction_score(features, grz, output_dir, project_name):
     """
     Calculate the total final value based on features and GRZ factors.
@@ -185,20 +283,26 @@ def add_construction_score(features, grz, output_dir, project_name):
         base_value = feature['base_value']
         lagefaktor = feature['lagefaktor']
         
-        total_value = base_value * lagefaktor * area
+        # Create spatial identifier
+        feature_id = create_feature_identifier(feature)
+        
+        # Step-by-step calculation
+        initial_value = base_value * lagefaktor * area
         factor_a, factor_b, factor_c = settings.grz_factors[grz]
-        total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
-        score = round(total_value_adjusted, 2)
+        adjusted_value = initial_value * factor_a
+        final_value = adjusted_value * (factor_b + factor_c)
+        score = round(final_value, 2)
         scores.append(score)
         
-        # Enhanced protocol message with feature identification
+        # Detailed protocol message
         protocol_message = (
             f"Construction Score Calculation:\n"
-            f"  Feature Type: {feature['name']}\n"  # Added feature type
+            f"  Feature ID: {feature_id}\n"
+            f"  Feature Type: {feature['name']}\n"
             f"  Area: {area:.2f}\n"
-            f"  Base Value: {base_value}\n"
-            f"  Lagefaktor: {lagefaktor}\n"
-            f"  Initial Total Value: {total_value:.2f}\n"
+            f"  Initial Value (Base * Lagefaktor * Area): {initial_value:.2f}\n"
+            f"  Adjusted Value (Initial * Factor A): {adjusted_value:.2f}\n"
+            f"  Final Value (Adjusted * (Factor B + Factor C)): {final_value:.2f}\n"
             f"  GRZ Factors (a,b,c): {factor_a}, {factor_b}, {factor_c}\n"
             f"  Final Score: {score}\n"
             f"-------------------"
@@ -374,65 +478,3 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
         [features, changing_feature_outside_B2], ignore_index=True)
 
     return features
-
-
-def calculate_compensatory_score(row, current_features, output_dir, project_name):
-    """
-    Calculate compensatory score with protocol logging.
-    """
-    if row['eligible'] == True:
-        area = row.geometry.area
-        compensat = row['compensat']
-        base_value = row['base_value']
-        lagefaktor = row['lagefaktor']
-        
-        final_v = (compensat - base_value) * area * lagefaktor
-        
-        if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
-            prot_value = get_value_with_warning(
-                settings.projects[settings.project_name].compensatory_protected_values, 
-                row['prot_name']
-            )
-        else:
-            prot_value = 1
-            
-        final_v = final_v * prot_value
-        
-        # Enhanced protocol message with feature identification
-        protocol_message = (
-            f"Compensatory Score Calculation:\n"
-            f"  Feature Type: {row['name']}\n"  # Added feature type
-            f"  Area: {area:.2f}\n"
-            f"  Compensatory Value: {compensat}\n"
-            f"  Base Value: {base_value}\n"
-            f"  Lagefaktor: {lagefaktor}\n"
-            f"  Protection Value: {prot_value}\n"
-            f"  Final Score: {final_v:.2f}\n"
-            f"-------------------"
-        )
-        write_protocol(protocol_message, output_dir, project_name)
-        
-        return round(final_v, 2)
-    else:
-        # Enhanced ineligible feature message
-        write_protocol(
-            f"Feature marked as not eligible - Feature Type: {row['name']} - Score: 0\n-------------------", 
-            output_dir, 
-            project_name
-        )
-        return 0
-
-
-def add_compensatory_score(features, scope, output_dir, project_name):
-    """
-    This function adds compensatory scores to a GeoDataFrame of features.
-    """
-    pt(features)
-    all_features = []
-    for file in features['name'].unique():
-        current_features = features[features['name'] == file].copy()
-        current_features['score'] = current_features.apply(
-            lambda row: round(calculate_compensatory_score(row, current_features, output_dir, project_name), 2), axis=1)
-        all_features.append(current_features)
-
-    return pd.concat(all_features, ignore_index=True)
