@@ -4,7 +4,7 @@ import geopandas as gpd
 import pandas as pd
 from gis_lagefaktor.debugging import pt
 from gis_lagefaktor.geospatial_ops import calculate_overlay, clean_geometries, filter_features, process_geodataframe_overlaps, merge_and_flatten_overlapping_geometries, remove_geometries_with_small_areas, calculate_intersection_area, remove_slivers, resolve_overlaps
-from gis_lagefaktor.data_handling import get_value_with_warning, get_features
+from gis_lagefaktor.data_handling import get_value_with_warning, get_features, write_protocol
 from gis_lagefaktor.lagefaktor import add_lagefaktor_values
 from gis_lagefaktor.config import settings
 import warnings
@@ -174,29 +174,35 @@ def process_and_overlay_features(base_features, unchanged_features, changing_fea
         return gpd.GeoDataFrame(columns=base_features.columns, crs=base_features.crs)
 
 
-def add_construction_score(features, grz):
+def add_construction_score(features, grz, output_dir, project_name):
     """
     Calculate the total final value based on features and GRZ factors.
-
-    Args:
-        features (list of dict): List of feature dictionaries.
-        grz (str): The GRZ factor.
-
-    Returns:
-        DataFrame: The features DataFrame with an additional 'score' column.
+    Now includes protocol writing for intermediate calculations.
     """
-
     scores = []
     for _, feature in features.iterrows():
         area = feature.geometry.area
-
-        total_value = feature['base_value'] * feature['lagefaktor'] * area
-
+        base_value = feature['base_value']
+        lagefaktor = feature['lagefaktor']
+        
+        total_value = base_value * lagefaktor * area
         factor_a, factor_b, factor_c = settings.grz_factors[grz]
-
         total_value_adjusted = total_value * factor_a * (factor_b + factor_c)
         score = round(total_value_adjusted, 2)
         scores.append(score)
+        
+        # Write calculation steps to protocol
+        protocol_message = (
+            f"Construction Score Calculation:\n"
+            f"  Area: {area:.2f}\n"
+            f"  Base Value: {base_value}\n"
+            f"  Lagefaktor: {lagefaktor}\n"
+            f"  Initial Total Value: {total_value:.2f}\n"
+            f"  GRZ Factors (a,b,c): {factor_a}, {factor_b}, {factor_c}\n"
+            f"  Final Score: {score}\n"
+            f"-------------------"
+        )
+        write_protocol(protocol_message, output_dir, project_name)
 
     features['score'] = scores
     return features
@@ -369,52 +375,61 @@ def process_and_separate_buffer_zones(scope, construction_feature, buffers, prot
     return features
 
 
-def calculate_compensatory_score(row, current_features):
+def calculate_compensatory_score(row, current_features, output_dir, project_name):
     """
-    This function calculates the compensatory score for a row in a GeoDataFrame.
-
-    Parameters:
-    row (GeoSeries): The row for which to calculate the compensatory score.
-    current_features (GeoDataFrame): The current features.
-
-    Returns:
-    float: The compensatory score.
+    Calculate compensatory score with protocol logging.
     """
-
     if row['eligible'] == True:
-        final_v = (row['compensat'] - row['base_value']) * \
-            row.geometry.area * row['lagefaktor']
+        area = row.geometry.area
+        compensat = row['compensat']
+        base_value = row['base_value']
+        lagefaktor = row['lagefaktor']
+        
+        final_v = (compensat - base_value) * area * lagefaktor
+        
         if 'prot_comp' in current_features.columns and pd.notnull(row['prot_comp']):
             prot_value = get_value_with_warning(
-                settings.projects[
-                    settings.project_name].compensatory_protected_values, row['prot_name'])
+                settings.projects[settings.project_name].compensatory_protected_values, 
+                row['prot_name']
+            )
         else:
             prot_value = 1
-
+            
         final_v = final_v * prot_value
-        return final_v
+        
+        # Write calculation steps to protocol
+        protocol_message = (
+            f"Compensatory Score Calculation:\n"
+            f"  Area: {area:.2f}\n"
+            f"  Compensatory Value: {compensat}\n"
+            f"  Base Value: {base_value}\n"
+            f"  Lagefaktor: {lagefaktor}\n"
+            f"  Protection Value: {prot_value}\n"
+            f"  Final Score: {final_v:.2f}\n"
+            f"-------------------"
+        )
+        write_protocol(protocol_message, output_dir, project_name)
+        
+        return round(final_v, 2)
     else:
+        write_protocol(
+            f"Feature marked as not eligible - Score: 0\n-------------------", 
+            output_dir, 
+            project_name
+        )
         return 0
 
 
-def add_compensatory_score(features, scope):
+def add_compensatory_score(features, scope, output_dir, project_name):
     """
     This function adds compensatory scores to a GeoDataFrame of features.
-
-    Parameters:
-    features (GeoDataFrame): The features to which to add compensatory scores.
-    scope (str): The scope of the operation.
-
-    Returns:
-    GeoDataFrame: The features with added compensatory scores.
     """
-
     pt(features)
     all_features = []
     for file in features['name'].unique():
         current_features = features[features['name'] == file].copy()
         current_features['score'] = current_features.apply(
-            lambda row: round(calculate_compensatory_score(row, current_features), 2), axis=1)
+            lambda row: round(calculate_compensatory_score(row, current_features, output_dir, project_name), 2), axis=1)
         all_features.append(current_features)
 
     return pd.concat(all_features, ignore_index=True)

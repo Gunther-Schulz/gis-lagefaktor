@@ -6,7 +6,7 @@ import argparse
 
 import openpyxl
 import yaml
-from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length, get_parcel_features
+from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length, get_parcel_features, write_protocol
 from gis_lagefaktor.feature_processing import process_features, add_compensatory_score, process_and_separate_buffer_zones
 from gis_lagefaktor.geospatial_ops import get_buffers, filter_features
 from gis_lagefaktor.visualization import create_plot
@@ -203,7 +203,11 @@ print(config.settings.project_name)
 
 print("Calculating construction score...")
 construction_features = add_construction_score(
-    construction_features, config.settings.projects[config.settings.project_name].grz)
+    construction_features, 
+    config.settings.projects[config.settings.project_name].grz,
+    OUTPUT_PATH,
+    config.settings.project_name
+)
 
 total_construction_score = round(
     construction_features['score'].sum(), 2)
@@ -227,7 +231,7 @@ write_output_json_and_excel(total_construction_score, construction_features,
 if not compensatory_features.empty:
     print("Calculating compensatory score...")
     compensatory_features = add_compensatory_score(
-        compensatory_features.copy(), scope)
+        compensatory_features, scope, OUTPUT_PATH, config.settings.project_name)
 
     print("Creating output shapefiles...")
     total_compensatory_score = round(compensatory_features['score'].sum(), 2)
@@ -450,3 +454,42 @@ plot_parcels_with_features(
 # print("\nParcel report areas:")
 # for _, row in parcel_report.iterrows():
 #     print(f"Parcel {row['label']}: Construction area = {row['construction_area']:.2f}, Compensatory area = {row['compensatory_area']:.2f}")
+
+# Before processing starts
+write_protocol(
+    f"Starting calculation for project: {config.settings.project_name}\n"
+    f"GRZ: {GRZ}\n"
+    f"CRS: {config.settings.crs}\n"
+    "-------------------",
+    OUTPUT_PATH,
+    config.settings.project_name
+)
+
+# After processing features
+write_protocol(
+    f"Processed Features:\n"
+    f"  Construction Features: {len(construction_features)}\n"
+    f"  Compensatory Features: {len(compensatory_features)}\n"
+    f"  Protected Areas: {len(protected_area_features)}\n"
+    "-------------------",
+    OUTPUT_PATH,
+    config.settings.project_name
+)
+
+# Update the score calculations
+construction_features = add_construction_score(
+    construction_features, 
+    config.settings.projects[config.settings.project_name].grz,
+    OUTPUT_PATH,
+    config.settings.project_name
+)
+
+# Write final scores to protocol
+write_protocol(
+    f"Final Scores:\n"
+    f"  Total Construction Score: {total_construction_score}\n"
+    f"  Total Compensatory Score: {total_compensatory_score}\n"
+    "-------------------",
+    OUTPUT_PATH,
+    config.settings.project_name
+)

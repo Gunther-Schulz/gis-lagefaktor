@@ -10,6 +10,7 @@ import geopandas as gpd
 import pandas as pd
 import simplejson as sjson
 import warnings
+from datetime import datetime
 
 from gis_lagefaktor.config import settings
 
@@ -254,3 +255,19 @@ def get_parcel_features(dir):
 
     parcel_features = pd.concat(features, ignore_index=True)
     return parcel_features
+
+
+def write_protocol(message, output_dir, project_name):
+    """
+    Writes a message to the protocol file with timestamp.
+    
+    Parameters:
+    message (str): The message to write to the protocol
+    output_dir (str): Directory where the protocol should be saved
+    project_name (str): Name of the project for the protocol file name
+    """
+    protocol_path = os.path.join(output_dir, f"{project_name}_protocol.txt")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    with open(protocol_path, 'a', encoding='utf-8') as f:
+        f.write(f"[{timestamp}] {message}\n")
