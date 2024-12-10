@@ -6,7 +6,7 @@ import argparse
 
 import openpyxl
 import yaml
-from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length, get_parcel_features
+from gis_lagefaktor.data_handling import get_features, save_to_shapefile, write_output_json_and_excel, check_and_warn_column_length, get_parcel_features, write_protocol
 from gis_lagefaktor.feature_processing import process_features, add_compensatory_score, process_and_separate_buffer_zones
 from gis_lagefaktor.geospatial_ops import get_buffers, filter_features
 from gis_lagefaktor.visualization import create_plot
@@ -38,25 +38,142 @@ parser = argparse.ArgumentParser(
 # Add the arguments
 parser.add_argument('project', metavar='project', type=str, nargs='?', default=None,
                     help='the project name')
-parser.add_argument('-n', '--new', metavar='NewProjectName',
-                    type=str, help='the new project name')
+parser.add_argument('-n', '--new', action='store_true',
+                    help='create a new project')
 parser.add_argument('-d', '--debug', action='store_true',
                     help='enable debug mode')
 
 # Parse the arguments
 args = parser.parse_args()
 
-# Update settings with command line arguments if provided
-if args.project:
-    config.settings.project_name = args.project
-
-# Load the base configuration
+# Load the base configuration first
 config.load_config()
 
-# Load project-specific configuration
-config.load_project_config()
+# Handle new project creation
+if args.new:
+    if not args.project:  # Check if project name was provided
+        print("Error: Please specify a project name when using -n flag")
+        print("Usage: python run.py -n <project_name>")
+        sys.exit(1)
+        
+    project_name = args.project
+    
+    if not hasattr(config.settings, 'projects'):
+        print("Error: No projects defined in config.yaml")
+        sys.exit(1)
+        
+    if project_name not in config.settings.projects:
+        print(f"Error: Project '{project_name}' is not defined in the configuration settings.")
+        sys.exit(1)
 
-GRZ = config.settings.projects[config.settings.project_name].grz
+    # Get parent directory path
+    dir_path = config.settings.projects[project_name].path
+    parent_dir = os.path.dirname(dir_path)
+
+    # Check if project already exists
+    if os.path.exists(dir_path):
+        print(f"Error: Project directory already exists at '{dir_path}'")
+        print("Please choose a different project name or remove the existing directory first.")
+        sys.exit(1)
+
+    # Check if parent directory exists
+    if not os.path.exists(parent_dir):
+        print(f"Error: Parent directory '{parent_dir}' does not exist. Please create it first.")
+        sys.exit(1)
+
+    # Create project directory
+    os.makedirs(dir_path, exist_ok=True)
+
+    # Create all required subdirectories
+    subdirs = [
+        'changing',
+        'compensatory',
+        'construction',
+        'debug',
+        'interference',
+        'output',
+        'parcel',
+        'protected',
+        'scope',
+        'unchanging'
+    ]
+
+    for subdir in subdirs:
+        os.makedirs(os.path.join(dir_path, subdir), exist_ok=True)
+
+    # Create project-specific config.yaml
+    project_config_path = os.path.join(dir_path, 'config.yaml')
+    config_dict = {
+        "changing_construction_base_values": {
+            "Acker": 1,
+            "Grünland": 6
+        },
+        "changing_compensatory_base_values": {
+            "Acker": 0,
+            "Acker Comp": 0,
+            "Grünland": 2
+        },
+        "compensatory_measure_values": {
+            "Wiese": 3
+        },
+        "compensatory_measure_minimum_area": {
+            "Wiese": 2000
+        },
+        "compensatory_protected_values": {
+            "VSG": 1.1,
+            "GGB": 1.1,
+            "Test": 2
+        },
+        "construction_lagefaktor_values": {
+            "<100": 0.75,
+            ">100<625": 1,
+            ">625": 1.25
+        },
+        "construction_protected_values": {
+            "NSG": 1.5,
+            "VSG": 1.25,
+            "GGB": 1.25
+        },
+        "grz": "0.5"
+    }
+
+    with open(project_config_path, 'w') as config_file:
+        yaml.dump(config_dict, config_file, allow_unicode=True, sort_keys=False)
+
+    print(f"""
+New project '{project_name}' has been created:
+- Project directory: {dir_path}
+- All required subdirectories created
+- Project config.yaml created with example values
+
+Next steps:
+1. Review and modify the config.yaml file as needed
+2. Add your shapefiles to the appropriate subdirectories
+3. Run the program again without the --new flag
+""")
+    sys.exit()
+
+try:
+    # Load project-specific configuration
+    config.load_project_config()
+    GRZ = config.settings.projects[config.settings.project_name].grz
+except Exception as e:
+    print(f"""
+Error: Unable to load configuration for project '{config.settings.project_name}'.
+To create this project, run:
+    python run.py -n {config.settings.project_name}
+
+If the project already exists, make sure it has a valid config.yaml file with all required settings.
+Required settings include:
+- grz
+- changing_construction_base_values
+- changing_compensatory_base_values
+- compensatory_measure_values
+- compensatory_protected_values
+- construction_lagefaktor_values
+- construction_protected_values
+""")
+    sys.exit(1)
 
 # Define directories
 dir_path = config.settings.projects[config.settings.project_name].path
@@ -74,47 +191,6 @@ PARCEL_PATH = os.path.join(dir_path, 'parcel')
 # List of directories to create
 dirs = [dir_path, SCOPE_PATH, CHANGING_PATH, CONSTRUCTION_PATH, UNCHANGING_PATH,
         COMPENSATORY_PATH, PROTECTED_PATH, OUTPUT_PATH, DEBUG_PATH, INTERFERENCE_PATH, PARCEL_PATH]
-
-# If the --new argument is provided, create the project directory and all subdirectories
-if args.new:
-    if args.new not in config.settings.projects:
-        print(
-            f"Error: Project '{args.new}' is not defined in the configuration settings.")
-        sys.exit()
-
-    # Create all directories
-    for dir in dirs:
-        os.makedirs(dir, exist_ok=True)
-
-    # Create a sample config.yaml in the project directory
-    sample_config_path = os.path.join(dir_path, 'config.yaml')
-    config_dict = {
-        "crs": "epsg:25833",
-        "buffer_gen_distances": [100, 625],
-        "buffer_distances": {
-            "<100": "<100",
-            ">100<625": ">100<625",
-            ">625": ">625"
-        },
-        "grz_factors": {
-            "0.5": [0.5, 0.2, 0.6],
-            "0.75": [0.75, 0.5, 0.8]
-        },
-        "default_sliver": 0.001,
-        "filter_small_areas": True,
-        "filter_small_areas_limit": 1,
-        "count_small_compensatory_if_adjacent": False,
-        "projects": {
-            args.new: {
-                "path": dir_path
-            }
-        }
-    }
-    with open(sample_config_path, 'w') as config_file:
-        yaml.dump(config_dict, config_file)
-
-    print(f"New project '{args.new}' has been created with all necessary directories and a sample config.yaml. Please edit the project config, add shape files (some are optional) to the project directory in the 'scope', 'changing', 'construction', 'unchanging', 'compensatory', and 'protected' directories, and run the program again.")
-    sys.exit()
 
 # Check if the project directory exists and is empty
 if os.path.exists(dir_path) and not os.listdir(dir_path):
@@ -203,7 +279,11 @@ print(config.settings.project_name)
 
 print("Calculating construction score...")
 construction_features = add_construction_score(
-    construction_features, config.settings.projects[config.settings.project_name].grz)
+    construction_features, 
+    config.settings.projects[config.settings.project_name].grz,
+    OUTPUT_PATH,
+    config.settings.project_name
+)
 
 total_construction_score = round(
     construction_features['score'].sum(), 2)
@@ -227,7 +307,7 @@ write_output_json_and_excel(total_construction_score, construction_features,
 if not compensatory_features.empty:
     print("Calculating compensatory score...")
     compensatory_features = add_compensatory_score(
-        compensatory_features.copy(), scope)
+        compensatory_features, scope, OUTPUT_PATH, config.settings.project_name)
 
     print("Creating output shapefiles...")
     total_compensatory_score = round(compensatory_features['score'].sum(), 2)
@@ -450,3 +530,42 @@ plot_parcels_with_features(
 # print("\nParcel report areas:")
 # for _, row in parcel_report.iterrows():
 #     print(f"Parcel {row['label']}: Construction area = {row['construction_area']:.2f}, Compensatory area = {row['compensatory_area']:.2f}")
+
+# Before processing starts
+write_protocol(
+    f"Starting calculation for project: {config.settings.project_name}\n"
+    f"GRZ: {GRZ}\n"
+    f"CRS: {config.settings.crs}\n"
+    "-------------------",
+    OUTPUT_PATH,
+    config.settings.project_name
+)
+
+# After processing features
+write_protocol(
+    f"Processed Features:\n"
+    f"  Construction Features: {len(construction_features)}\n"
+    f"  Compensatory Features: {len(compensatory_features)}\n"
+    f"  Protected Areas: {len(protected_area_features)}\n"
+    "-------------------",
+    OUTPUT_PATH,
+    config.settings.project_name
+)
+
+# Update the score calculations
+construction_features = add_construction_score(
+    construction_features, 
+    config.settings.projects[config.settings.project_name].grz,
+    OUTPUT_PATH,
+    config.settings.project_name
+)
+
+# Write final scores to protocol
+write_protocol(
+    f"Final Scores:\n"
+    f"  Total Construction Score: {total_construction_score}\n"
+    f"  Total Compensatory Score: {total_compensatory_score}\n"
+    "-------------------",
+    OUTPUT_PATH,
+    config.settings.project_name
+)

@@ -1,6 +1,8 @@
 # config.py
 import yaml
 from box import Box
+import os
+import sys
 
 # TODO: Don't keep all projects in settings, only the one that is currently used and have it in top level like "project" -> "path"
 
@@ -65,15 +67,33 @@ settings = Box({})
 
 
 def load_config(base_config_path='config.yaml'):
-    with open(base_config_path, 'r') as file:
-        loaded_settings = yaml.safe_load(file) or {}
-        settings.update(Box(loaded_settings))
-        settings.output_dir = settings.projects[settings.project_name].path + "/output"
+    try:
+        with open(base_config_path, 'r') as file:
+            loaded_settings = yaml.safe_load(file) or {}
+            settings.update(Box(loaded_settings))
+            # Only set output_dir if project_name is set
+            if hasattr(settings, 'project_name') and settings.project_name:
+                settings.output_dir = settings.projects[settings.project_name].path + "/output"
+    except FileNotFoundError:
+        print(f"Error: Base configuration file '{base_config_path}' not found.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error loading base configuration: {str(e)}")
+        sys.exit(1)
 
 
 def load_project_config():
+    # Skip if project_name is not set yet
+    if not hasattr(settings, 'project_name') or not settings.project_name:
+        return
+        
     project_name = settings.project_name
     project_config_path = f'{settings.projects[project_name].path}/config.yaml'
+    
+    # Skip if project config doesn't exist (it will be created if --new flag is used)
+    if not os.path.exists(project_config_path):
+        return
+        
     with open(project_config_path, 'r') as file:
         project_settings = yaml.safe_load(file) or {}
         # Merge project-specific defaults with loaded settings for the specific project
