@@ -56,7 +56,7 @@ if args.new:
         print("Usage: python run.py -n <project_name>")
         sys.exit(1)
         
-    project_name = args.project  # Use the positional argument as the project name
+    project_name = args.project
     
     if not hasattr(config.settings, 'projects'):
         print("Error: No projects defined in config.yaml")
@@ -70,10 +70,16 @@ if args.new:
     dir_path = config.settings.projects[project_name].path
     parent_dir = os.path.dirname(dir_path)
 
+    # Check if project already exists
+    if os.path.exists(dir_path):
+        print(f"Error: Project directory already exists at '{dir_path}'")
+        print("Please choose a different project name or remove the existing directory first.")
+        sys.exit(1)
+
     # Check if parent directory exists
     if not os.path.exists(parent_dir):
         print(f"Error: Parent directory '{parent_dir}' does not exist. Please create it first.")
-        sys.exit()
+        sys.exit(1)
 
     # Create project directory
     os.makedirs(dir_path, exist_ok=True)
@@ -135,7 +141,7 @@ if args.new:
         yaml.dump(config_dict, config_file, allow_unicode=True, sort_keys=False)
 
     print(f"""
-New project '{args.new}' has been created:
+New project '{project_name}' has been created:
 - Project directory: {dir_path}
 - All required subdirectories created
 - Project config.yaml created with example values
