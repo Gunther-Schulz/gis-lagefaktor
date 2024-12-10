@@ -17,5 +17,7 @@ count_small_compensatory_if_adjacent: false
 projects:
   Waren:
     path: "/home/g/hidrive/Öffentlich Planungsbüro Schulz/Projekte/22-20 Maxsolar - Waren, Grabowhöfe/GIS/Lagefaktor/Waren"
+  Waren_2:
+    path: "/home/g/hidrive/Öffentlich Planungsbüro Schulz/Projekte/22-20 Maxsolar - Waren, Grabowhöfe/GIS/Lagefaktor/Waren_2"
   Friedrichshof:
     path: "/home/g/hidrive/Öffentlich Planungsbüro Schulz/Projekte/22-16 Maxsolar - Friedrichshof/GIS/Lagefaktor_var1/"
