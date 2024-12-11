@@ -85,18 +85,30 @@ def load_config(base_config_path='config.yaml'):
 def load_project_config():
     # Skip if project_name is not set yet
     if not hasattr(settings, 'project_name') or not settings.project_name:
-        return
+        print("Error: No project name specified.")
+        print("Usage: python run.py <project_name>")
+        print("   or: python run.py -n <project_name> (to create a new project)")
+        sys.exit(1)
         
     project_name = settings.project_name
     project_config_path = f'{settings.projects[project_name].path}/config.yaml'
     
-    # Skip if project config doesn't exist (it will be created if --new flag is used)
-    if not os.path.exists(project_config_path):
-        return
-        
-    with open(project_config_path, 'r') as file:
-        project_settings = yaml.safe_load(file) or {}
-        # Merge project-specific defaults with loaded settings for the specific project
-        complete_project_settings = {
-            **settings.projects[project_name], **project_settings}
-        settings.projects[project_name].update(Box(complete_project_settings))
+    try:
+        # Skip if project config doesn't exist (it will be created if --new flag is used)
+        if not os.path.exists(project_config_path):
+            print(f"""
+Error: Project configuration not found for '{project_name}'.
+To create this project, run:
+    python run.py -n {project_name}
+""")
+            sys.exit(1)
+            
+        with open(project_config_path, 'r') as file:
+            project_settings = yaml.safe_load(file) or {}
+            # Merge project-specific defaults with loaded settings for the specific project
+            complete_project_settings = {
+                **settings.projects[project_name], **project_settings}
+            settings.projects[project_name].update(Box(complete_project_settings))
+    except Exception as e:
+        print(f"Error loading project configuration: {str(e)}")
+        sys.exit(1)

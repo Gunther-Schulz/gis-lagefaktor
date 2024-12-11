@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import os
+os.environ['QT_QPA_PLATFORM'] = 'xcb'
 
 import matplotlib.pyplot as plt
 import argparse
@@ -48,6 +50,10 @@ args = parser.parse_args()
 
 # Load the base configuration first
 config.load_config()
+
+# Set project name in settings
+if args.project:
+    config.settings.project_name = args.project
 
 # Handle new project creation
 if args.new:

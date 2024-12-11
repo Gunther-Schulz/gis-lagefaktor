@@ -278,6 +278,7 @@ def add_construction_score(features, grz, output_dir, project_name):
     Calculate the total final value based on features and GRZ factors.
     Now includes detailed step-by-step calculation protocol.
     """
+    pt(features)
     scores = []
     for _, feature in features.iterrows():
         area = feature.geometry.area
